@@ -1,0 +1,18 @@
+# build output and release artifacts (publish the zip as a GitHub release instead)
+dist/
+release/
+src/obj/
+src/bin/
+# decompiled game code and analysis dumps: copyrighted, never commit
+discovery/
+# local test material and logs
+backups/
+tools/fakegame/
+tools/*.log
+tools/pids.txt
+tools/session.out
+tools/guid2.txt
+bepinex-installed-files.txt
+*.user
+.vs/
+third_party/

@@ -1,0 +1,137 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using Newtonsoft.Json;
+using UnityEngine;
+
+namespace HFCoop
+{
+    /// <summary>
+    /// Doors and windows are installed into walls (the wall is swapped for one with a hole / the opening is closed again). The game records them in
+    /// Recording.wallInstallations, not as normal item changes, so nothing reached the other peer: a door installed by one player never appeared on the other
+    /// side and the wall kept standing there. We watch that list, send each new or changed installation with the door item's network id, and the other peer
+    /// installs it through the game's own HouseSaveManager.ApplyNewWallModifications (the code path of loading a saved door, which also swaps the walls).
+    /// The item gets the same network id on both peers, so selling it later is replicated by the normal item sync (which already restores the wall).
+    /// </summary>
+    internal static class InstSync
+    {
+        static readonly Dictionary<InstallationsModification, string> Known = new Dictionary<InstallationsModification, string>();
+        static readonly JsonSerializerSettings Ser = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore, Formatting = Formatting.None };
+        static readonly HashSet<InstallationsModification> _alive = new HashSet<InstallationsModification>();
+        static readonly HashSet<InstallationsModification> _warned = new HashSet<InstallationsModification>();
+        static bool _primed; static double _next;
+        static MethodInfo _apply;
+
+        static Recording Cur()
+        {
+            var h = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager;
+            return h != null && h.Recorder != null ? h.Recorder.currentRecording : null;
+        }
+
+        static PropertyInfo _itemProp; static bool _itemLooked;
+        /// <summary>The door/window Item behind an installation record (the WallInstallation keeps it in its one Item-typed property; it is not always a parent object).</summary>
+        public static Item ItemOf(InstallationsModification e)
+        {
+            if (e.item != null) return e.item;
+            if (e.instance == null) return null;
+            if (!_itemLooked)
+            {
+                _itemLooked = true;
+                foreach (var p in typeof(Empyrean.HouseFlipper.WallModifiers.WallInstallation).GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (p.PropertyType == typeof(Item) && p.CanRead) { _itemProp = p; break; }
+            }
+            Item it = _itemProp != null ? _itemProp.GetValue(e.instance, null) as Item : null;
+            return it != null ? it : e.instance.GetComponentInParent<Item>();
+        }
+
+        static string Json(InstallationsModification e) { return JsonConvert.SerializeObject(e, Ser); }
+
+        public static void Reset() { Known.Clear(); _alive.Clear(); _primed = false; }
+
+        public static void Prime()
+        {
+            var rec = Cur(); if (rec == null || rec.wallInstallations == null) return;
+            Known.Clear();
+            foreach (var e in rec.wallInstallations) { try { Known[e] = Json(e); } catch { } }
+            _primed = true;
+        }
+
+        public static void Tick()
+        {
+            if (!Session.Active || Time.realtimeSinceStartup < _next) return;
+            _next = Time.realtimeSinceStartup + 0.5f;
+            var rec = Cur(); if (rec == null || rec.wallInstallations == null) return;
+            if (!_primed) { Prime(); return; }
+            foreach (var e in new List<InstallationsModification>(rec.wallInstallations))
+            {
+                string js; try { js = Json(e); } catch (Exception ex) { Plugin.Log.LogWarning("[inst] serialize: " + ex.Message); continue; }
+                string old; if (Known.TryGetValue(e, out old) && old == js) continue;
+                var item = ItemOf(e);
+                if (item == null) { if (_warned.Add(e)) Plugin.Log.LogWarning("[inst] installation without item yet: instance=" + (e.instance != null) + " guid=" + e.windowGuid); continue; } // retried on the next poll
+                string id = ItemSync.NetIdPublic(item, true); if (id == null) { if (_warned.Add(e)) Plugin.Log.LogWarning("[inst] no net id for " + item.name); continue; }
+                Known[e] = js;
+                ItemSync.QueuePublic(item); // the door must exist on the other peer before its installation arrives
+                Events.Send("inst", id, js);
+                if (Cfg.VerboseLog.Value) Plugin.Log.LogInfo("[inst] sent installation " + id + " (" + e.windowGuid + ")");
+            }
+            // an installation whose door/window was removed by a sale applied from another peer: the game only drops the record for local sales
+            for (int i = rec.wallInstallations.Count - 1; i >= 0; i--)
+            {
+                var w = rec.wallInstallations[i];
+                if (w.instance != null) _alive.Add(w);
+                else if (_alive.Contains(w)) { rec.wallInstallations.RemoveAt(i); Known.Remove(w); _alive.Remove(w); }
+            }
+            var gone = new List<InstallationsModification>();
+            foreach (var k in Known.Keys) if (!rec.wallInstallations.Contains(k)) gone.Add(k);
+            foreach (var k in gone) Known.Remove(k); // a removed installation = a sold door/window: the item sync deletes the item on the other peer
+        }
+
+        public static bool Apply(string id, string json)
+        {
+            var mod = JsonConvert.DeserializeObject<InstallationsModification>(json);
+            if (mod == null) return false;
+            bool scene = id.StartsWith("s:");
+            var rec0 = Cur();
+            if (!scene)
+            {
+                var old = ItemSync.ByNetId(id);
+                if (old != null)
+                {
+                    // the plain copy made by the item sync is not installed in a wall: replace it by a real installation (swaps the wall like loading a saved door)
+                    var have = rec0 != null && rec0.wallInstallations != null ? rec0.wallInstallations.Find(x => ItemOf(x) == old) : null;
+                    if (have != null)
+                    {
+                        if (have.state == mod.state) return true; // nothing new
+                        rec0.wallInstallations.Remove(have); Known.Remove(have); // a later stage of the install (wall torn down, installed): rebuild it in that state
+                        // the installation (door frame, the wall plug the hammer smashes) is its own object next to the item: destroying the item leaves it behind
+                        if (have.instance != null) UnityEngine.Object.Destroy(have.instance.gameObject);
+                    }
+                    ItemSync.Discard(id);
+                }
+            }
+            if (scene) mod.sceneGuid = id.Substring(2);
+            if (_apply == null) _apply = typeof(HouseSaveManager).GetMethod("ApplyNewWallModifications", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (_apply == null) { Plugin.Log.LogWarning("[inst] ApplyNewWallModifications not found"); return false; }
+            var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null);
+            _apply.Invoke(hsm, new object[] { new List<InstallationsModification> { mod } });
+            var rec = Cur();
+            if (mod.instance != null)
+            {
+                var it = ItemOf(mod);
+                if (it != null && !scene) ItemSync.RegisterCreated(id, it);
+                if (rec != null && rec.wallInstallations != null)
+                {
+                    var local = rec.wallInstallations.Find(x => x.instance == mod.instance);
+                    if (local == null) rec.wallInstallations.Add(mod); else { local.position = mod.position; local.rotation = mod.rotation; local.variants = mod.variants; local.state = mod.state; mod = local; }
+                }
+            }
+            try { Known[mod] = Json(mod); } catch { }
+            Plugin.Log.LogInfo("[inst] installation " + id + " applied (" + mod.windowGuid + ", state " + mod.state + ")");
+            // past the "smash the wall" stage the plug is gone for good
+            if (mod.instance != null && (int)mod.state >= 1)
+                foreach (var plug in mod.instance.GetComponentsInChildren<Empyrean.HouseFlipper.WallModifiers.DestroyableWallPlug>(true)) UnityEngine.Object.Destroy(plug.gameObject);
+            RecSync.RequestMeshRebuild();
+            return true;
+        }
+    }
+}
