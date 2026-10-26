@@ -135,6 +135,8 @@ namespace HFCoop
         {
             var c = Resolve(key) as Interactable;
             if (c == null) { Plugin.Log.LogWarning("[use] cannot resolve " + key); return false; }
+            // lamp states travel through LightSync; a client's copy of the switch has its own wiring (or none), so it must not toggle lamps on its own here
+            if (Session.Role == Role.Client) for (var t = c.GetType(); t != null; t = t.BaseType) if (t.Name == "HFLightSwitch") return true;
             Vector3? pos = null;
             if (!string.IsNullOrEmpty(json))
             {

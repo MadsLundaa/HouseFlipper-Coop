@@ -33,7 +33,7 @@ namespace HFCoop
                 var h = Held.ToArray(); Held.Clear();
                 foreach (var kv in h) { var rr = new R(kv.Value); Handle(kv.Key, rr.Type, rr, kv.Value); }
             }
-            Watchdog.Phase("evt.item"); ItemSync.Tick(); InstSync.Tick(); MountSync.Tick(); Watchdog.Phase("evt.rec"); RecSync.Tick(); Watchdog.Phase("evt.money"); MoneySync.Tick(); ProgressSync.Tick(); FollowHost.Tick(); ClockSync.Tick(); DaySync.Tick(); JobSync.Tick(); CarrySync.Tick();
+            Watchdog.Phase("evt.item"); ItemSync.Tick(); InstSync.Tick(); MountSync.Tick(); LightSync.Tick(); Watchdog.Phase("evt.rec"); RecSync.Tick(); Watchdog.Phase("evt.money"); MoneySync.Tick(); ProgressSync.Tick(); FollowHost.Tick(); ClockSync.Tick(); DaySync.Tick(); JobSync.Tick(); CarrySync.Tick();
         }
 
         public static void OnSessionStart() { MoneySync.OnSessionStart(); }
@@ -47,7 +47,7 @@ namespace HFCoop
             return false;
         }
 
-        public static void OnSessionEnd() { ItemSync.Reset(); RecSync.Reset(); Snapshot.Loading = false; Snapshot.Ready = false; Applying = false; MoneySync.OnSessionEnd(); ProgressSync.OnSessionEnd(); FollowHost.Reset(); ClockSync.Reset(); JobSync.Reset(); CarrySync.Reset(); MountSync.Reset(); InstSync.Reset(); }
+        public static void OnSessionEnd() { ItemSync.Reset(); RecSync.Reset(); Snapshot.Loading = false; Snapshot.Ready = false; Applying = false; MoneySync.OnSessionEnd(); ProgressSync.OnSessionEnd(); FollowHost.Reset(); ClockSync.Reset(); JobSync.Reset(); CarrySync.Reset(); MountSync.Reset(); InstSync.Reset(); LightSync.Reset(); }
         public static void OnPlayerJoined(Conn c) { MoneySync.SendBalanceTo(c); ProgressSync.SendFullTo(c); }
         public static void OnPlayerLeft(int id) { }
         /// <summary>Client got Welcome: ask for the host's current house state.</summary>
@@ -87,6 +87,7 @@ namespace HFCoop
                     case "carry": ok = CarrySync.Apply(key, json); break;
                     case "mount": ok = MountSync.Apply(key); break;
                     case "inst": ok = InstSync.Apply(key, json); break;
+                    case "light": ok = LightSync.Apply(key, json); break;
                     default: Plugin.Log.LogWarning("[evt] unknown event kind " + kind); break;
                 }
             }

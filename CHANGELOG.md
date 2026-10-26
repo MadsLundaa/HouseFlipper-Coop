@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.5
+* Floor tiles now show up for the other player (the floor's combined mesh is rebuilt after a remote change).
+* Light switches and lamps bought while connected work for both players (lamp on/off states are synced directly).
+* Buying and placing job items, and selling them, update the other player's job task list the way a local drop/sale does.
+* Joining a job house is more robust: a newer house arriving during a load is queued, a load that never finishes is retried after 90 s instead of leaving "Loading host's house...".
+
 ## 0.4.4
 * Demolition (hammer) of inner walls syncs, including the job counters and the visible wall mesh.
 * Doors and windows: every install stage, selling, and open/close (also doors placed in earlier sessions) sync; the wall inside a new door opens on both sides.

@@ -100,7 +100,9 @@ namespace HFCoop
             {
                 int n = 0;
                 foreach (var c in UnityEngine.Object.FindObjectsOfType<WallsMeshCombiner>()) { c.BuildAll(); n++; }
-                Plugin.Log.LogInfo("[rec] rebuilt " + n + " combined wall mesh(es)");
+                int fl = 0;
+                foreach (var c in UnityEngine.Object.FindObjectsOfType<Code.HouseBuildingBlocks.FloorTilesCombiner>()) { c.Rebuild(); fl++; }
+                Plugin.Log.LogInfo("[rec] rebuilt " + n + " combined wall mesh(es) and " + fl + " floor tile mesh(es)");
             }
             catch (Exception e) { Plugin.Log.LogWarning("[rec] wall mesh rebuild failed: " + (e.InnerException ?? e).Message); }
         }
@@ -288,6 +290,7 @@ namespace HFCoop
                 catch (Exception e) { Plugin.Log.LogError("[rec] " + name + " failed: " + (e.InnerException ?? e)); }
             }
             if (isWallField) ProgressSync.Rebase();
+            if (field == "modifiedFloors" || field == "modifiedCeilings") RequestMeshRebuild(); // the floors are drawn by combined meshes: the loader only swaps the tile material
             foreach (var kv in WallSidePatch.Touched) { try { if (kv.Key != null) kv.Key.FinalizePaintProcess(kv.Value); } catch (Exception e) { Plugin.Log.LogWarning("[rec] FinalizePaintProcess: " + e.Message); } }
             WallSidePatch.Touched = null;
             // keep our own recording (what the host saves) consistent

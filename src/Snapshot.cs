@@ -26,7 +26,8 @@ namespace HFCoop
         /// <summary>True from receiving the host house until the player returns to the menu: such a house must never be saved over the player's own save.</summary>
         public static bool Tainted;
         static double _loadStart; static bool _sawLoadStart;
-        static string _mapJson;
+        static string _mapJson, _loadScene;
+        static byte[] _queuedSnapshot; // a newer snapshot that arrived while one was still loading (the host moved on again)
 
         /// <summary>The game's HouseSaveManager. Its static Instance is only set once a house scene is loaded; from the main menu we reach it through GameManager.houseSaveManager.</summary>
         public static HouseSaveManager Hsm
@@ -86,8 +87,15 @@ namespace HFCoop
         public static void Receive(R r)
         {
             _awaiting = false;
-            if (Loading) { Plugin.Log.LogInfo("[snap] ignoring duplicate snapshot while loading"); return; }
-            string scene = r.S(); _mapJson = r.S(); var gz = r.Bytes();
+            if (Loading)
+            {
+                // the host changed house again while we are still loading: remember the newest one and apply it as soon as this load ends
+                string qs = r.S(); string qm = r.S(); var qgz = r.Bytes();
+                _queuedSnapshot = new W(Msg.Snapshot).S(qs).S(qm).Bytes(qgz).Done();
+                Plugin.Log.LogInfo("[snap] a newer snapshot arrived while loading; it will be loaded next");
+                return;
+            }
+            string scene = r.S(); _mapJson = r.S(); var gz = r.Bytes(); _loadScene = scene;
             string json = Gunzip(gz);
             Plugin.Log.LogInfo("[snap] received snapshot for " + scene + " (" + json.Length + " chars)");
             Recording rec;
@@ -135,13 +143,23 @@ namespace HFCoop
             var h = Hsm;
             if (h != null && h.isWaitingForApplyingSave) _sawLoadStart = true;
             double age = Session.Now - _loadStart;
-            bool done = h != null && !h.isWaitingForApplyingSave && ((_sawLoadStart && age > 3) || age > 45);
+            // fresh houses (orders) never raise isWaitingForApplyingSave: the right scene with a recorder also counts as loaded
+            bool sceneUp = h != null && h.Recorder != null && h.Recorder.currentRecording != null && Plugin.SceneName.Length > 0 && Plugin.SceneName == _loadScene;
+            bool done = h != null && !h.isWaitingForApplyingSave && ((_sawLoadStart && age > 3) || (sceneUp && age > 6) || age > 45);
+            if (!done && age > 90)
+            {
+                // never leave the player on "Loading host's house...": give up waiting, say why in the log, and fetch the house again
+                Plugin.Log.LogError("[snap] load did not finish after 90 s (waiting=" + (h != null && h.isWaitingForApplyingSave) + ", scene=" + Plugin.SceneName + ", expected=" + _loadScene + ", hsm=" + (h != null) + "): asking the host again");
+                Loading = false; Events.Applying = false; Ready = false; Request();
+                return;
+            }
             if (!done) return;
             Loading = false; Events.Applying = false; Ready = true;
             if (h != null && h.Recorder != null) ItemSync.ImportIdMap(h.Recorder.currentRecording, _mapJson);
             RecSync.Prime(); InstSync.Prime(); ProgressSync.OnHouseReady();
             Session.Status = "Connected to " + Session.HostName;
             Plugin.Log.LogInfo("[snap] house loaded from host snapshot");
+            if (_queuedSnapshot != null) { var q = _queuedSnapshot; _queuedSnapshot = null; var rr = new R(q); Plugin.Log.LogInfo("[snap] loading the newer snapshot"); Receive(rr); }
         }
     }
 }

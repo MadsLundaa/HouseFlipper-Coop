@@ -176,3 +176,10 @@ Found while two players worked for an hour; all verified with two instances on o
 * **Selling an item another player is working on** releases the local zoom before the item is destroyed.
 
 Known gaps: removals from recording lists (other than via the paths above), runtime dirt / minimap phantom dirt and dirt %, leaking puddles created at runtime are not replicated, job-house items without scene guid and not in `modifiedItems` get no net id.
+
+## 13. Floors, lamps and job task lists (0.4.5)
+
+* **Floor tiles:** `modifiedFloors` was already replicated, but the loader only swaps the tile material; the floor is drawn by `FloorTilesCombiner` (like the wall mesh). After applying floors/ceilings the combiners are rebuilt (`FloorTilesCombiner.Rebuild`, `WallsMeshCombiner.BuildAll`, debounced 0.5 s). Wall panels needed nothing extra.
+* **Lamps** (`LightSync`): the room's light switch reaches only lamps its `Room` registered; a lamp/switch created from another peer's item event is not wired. Each peer reports lamps whose on/off state changed (per item net id, scan every 0.4 s) and the other peer calls `TurnOn`/`TurnOff`. A copy of someone else's lamp is only recorded, never reported, on first sight (it starts in its default state and must not overwrite the original). A client ignores remote `HFLightSwitch` use events (host toggles from a client's use event and the lamp events come back).
+* **Job task lists:** furniture tasks count through the static event hub (`placed`, `sold`). Remote creation/moves call the placement helper (found by shape: static class, two `(Item,bool)` methods) and remote sales raise the sold event before the object is destroyed (`GameEvents`). Money was checked: no double payout.
+* **Joining a house:** a snapshot that arrives while another is loading is queued; completion also accepts "right scene + recorder" (fresh job houses never raise `isWaitingForApplyingSave`); after 90 s without completion the load is abandoned with a log line and the house is requested again.

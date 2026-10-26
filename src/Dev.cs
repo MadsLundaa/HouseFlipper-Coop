@@ -10,6 +10,7 @@ namespace HFCoop
     /// <summary>Developer/test command channel: write lines into BepInEx/hfcoop-cmd-&lt;pid&gt;.txt and the plugin executes them. Only active when DevCommands is enabled in config.</summary>
     internal static class Dev
     {
+        static System.Collections.Generic.Dictionary<string, string> _recSnap;
         static double _next;
         static string _file;
 
@@ -335,6 +336,37 @@ namespace HFCoop
                     {
                         var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager; var rec = hsm.Recorder.currentRecording;
                         foreach (var m in rec.modifiedWalls) Plugin.Log.LogInfo("[dev] modpos " + m.description + " -> " + m.GetWorldPosition());
+                        break;
+                    }
+                case "floormat": // floormat <x> <z>: material of the floor tiles within 0.3 m of a point (compare host and client)
+                    {
+                        var P = new Vector3(float.Parse(a[1], System.Globalization.CultureInfo.InvariantCulture), 0f, float.Parse(a[2], System.Globalization.CultureInfo.InvariantCulture));
+                        int n = 0;
+                        foreach (var r in Resources.FindObjectsOfTypeAll<Renderer>())
+                        {
+                            if (!r.gameObject.scene.IsValid() || !r.gameObject.activeInHierarchy) continue;
+                            var p = r.transform.position; if (Mathf.Abs(p.x - P.x) > 0.3f || Mathf.Abs(p.z - P.z) > 0.3f || p.y > 0.3f) continue;
+                            if (n++ > 20) break;
+                            Plugin.Log.LogInfo("[dev] floormat " + r.name + " en=" + r.enabled + " mat=" + (r.sharedMaterial != null ? r.sharedMaterial.name : "-") + " pos=" + p + " path=" + Inspector.Path(r.transform));
+                        }
+                        Plugin.Log.LogInfo("[dev] floormat done " + n);
+                        break;
+                    }
+                case "recsnap": // remember every Recording field (JSON hash) ...
+                case "recdiff": // ... and list which fields changed since (find out where the game records an action)
+                    {
+                        var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager; var rec = hsm.Recorder.currentRecording;
+                        var cur = new System.Collections.Generic.Dictionary<string, string>();
+                        var ser = new Newtonsoft.Json.JsonSerializerSettings { ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore };
+                        foreach (var f in typeof(Recording).GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public))
+                        {
+                            try { var v = f.GetValue(rec); var js = Newtonsoft.Json.JsonConvert.SerializeObject(v, ser); var l = v as System.Collections.IList; cur[f.Name] = (l != null ? l.Count + ":" : "") + js.GetHashCode(); }
+                            catch (Exception) { cur[f.Name] = "?"; }
+                        }
+                        if (a[0] == "recsnap") { _recSnap = cur; Plugin.Log.LogInfo("[dev] recsnap stored " + cur.Count + " fields"); break; }
+                        int n = 0;
+                        foreach (var kv in cur) { string old; if (_recSnap == null || !_recSnap.TryGetValue(kv.Key, out old) || old != kv.Value) { Plugin.Log.LogInfo("[dev] recdiff changed: " + kv.Key + " " + (_recSnap != null && _recSnap.ContainsKey(kv.Key) ? _recSnap[kv.Key] : "-") + " -> " + kv.Value); n++; } }
+                        Plugin.Log.LogInfo("[dev] recdiff " + n + " field(s) changed");
                         break;
                     }
                 case "dirts": // census of Dirt objects by type: total, with scene guid, without (runtime-created)

@@ -229,6 +229,7 @@ namespace HFCoop
             }
             mod.instance = inst;
             if (mod.isDestroyed && inst != null) ReleaseZoom(inst);
+            if (mod.isDestroyed && inst != null) { try { GameEvents.RaiseSold(inst); } catch (Exception e) { Plugin.Log.LogWarning("[item] sold event failed: " + (e.InnerException ?? e).Message); } }
             if (mod.isDestroyed && inst != null) RecordSale(inst, scene ? netId.Substring(2) : null);
             if (inst != null && !scene && !mod.isDestroyed)
             {
@@ -243,7 +244,19 @@ namespace HFCoop
             if (mod.isDestroyed) { CreatedById.Remove(netId); LastJson.Remove(netId); }
             else LastJson[netId] = json;
             RecordInLocalSave(mod, netId);
+            if (!mod.isDestroyed && mod.instance != null) FinishRemotePlacement(mod.instance);
             return true;
+        }
+
+        /// <summary>
+        /// The game files an item into the room it stands in (room item lists: job tasks like "place the sideboard 0/2", the room light switch...) when the player puts it
+        /// down (Item.Moved). A copy created or moved from another peer never went through that, so the job counter and the room wiring ignored it until someone picked it
+        /// up and put it down again.
+        /// </summary>
+        static void FinishRemotePlacement(Item item)
+        {
+            try { if (!GameEvents.RaisePlaced(item)) { item.ResetBoundRoom(); item.Moved(); } }
+            catch (Exception e) { Plugin.Log.LogWarning("[item] could not file " + item.name + " into its room: " + (e.InnerException ?? e).Message); }
         }
 
         /// <summary>Keep this peer's own Recording (what the host saves) in sync with the applied change.</summary>

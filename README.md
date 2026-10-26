@@ -1,4 +1,4 @@
-# House Flipper Co-op (prototype 0.4.4)
+# House Flipper Co-op (prototype 0.4.5)
 
 A BepInEx plugin that lets several people renovate **the same house** in the **original House Flipper (2018, Steam)** at the same time.
 It is a prototype: the core loop (join, see each other, shared house state, shared money, host-owned save) is implemented and was tested with two real game instances; some systems are untested or not shared (see *Limitations* and `docs/test-checklist.md`).
@@ -11,6 +11,7 @@ It is a prototype: the core loop (join, see each other, shared house state, shar
 | Furniture/items: move, buy (new items), sell/dispose, damage | game's own item save record, replicated per item; an item being carried is shown moving live to the others |
 | Dirt cleaned, windows cleaned, wall paint/wallpaper, floors/tiles/ceilings, plaster | game's own save lists, replicated as deltas |
 | Demolition (hammer) of inner walls, in jobs and the main house | removed on the other peer the way the hammer does it (mesh, job counter and markers update) |
+| Lamps and light switches (also ones bought while connected), floor tiles and wall panels, job task lists for placed/sold furniture | lamp on/off states are replicated per lamp; tiles use the game's save lists plus a mesh rebuild; placed/sold items raise the same game events a local drop/sale does |
 | Doors and windows: install (all stages, incl. smashing the wall inside), sell, open/close, also those placed earlier | installation records replicated; doors get stable ids |
 | Repairs: mounted devices (radiators...), electrical outlets, fuse boxes, replaced sockets | "fully mounted" event / game save lists; leaving a camera lock when someone else finishes or sells the object |
 | Doors, garage doors, windows, curtains, gates, drawers, light switches | "use" replicated to the same object |

@@ -267,3 +267,6 @@ To test: host + client connected; press **Ctrl+F12** on the host (or on the clie
 
 ## 0.4.4 two-instance tests (2026-10-25, user watched both windows)
 Verified: window zoom released when the other player finishes it; mounted radiator syncs both ways without a leak on the other side; door sell/install/hammer-the-wall-inside opens the wall on both sides and the door opens/closes on both; demolition of inner walls from host and client (wall disappears, job counter moves); perk points follow the host; selling an item while another player assembles it releases them; electrical outlet and fuse box repairs sync. NOT verified: dirt %, minimap dirt, laptop on 0.4.4 (laptop was unreachable).
+
+## 0.4.5 two-instance tests (2026-10-26, user watched both windows)
+Verified: floor tiles appear for the other player; lamp + switch bought while connected work from host and from client; selling job items updates the other player's task list; buying/placing a job item moves both task counters; following the host into a job house loaded without hanging (harness). NOT reproduced: the reported infinite "Loading host's house" (hardened, not proven fixed).
