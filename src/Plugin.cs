@@ -1,4 +1,4 @@
-﻿using BepInEx;
+using BepInEx;
 using BepInEx.Logging;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -9,7 +9,7 @@ namespace HFCoop
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "dev.hfcoop";
-        public const string Version = "0.4.5";
+        public const string Version = "0.4.6";
         internal static ManualLogSource Log;
         internal static string GameBuild = "";
 
@@ -40,6 +40,13 @@ namespace HFCoop
                 foreach (var t in pc.GetComponentsInChildren<Assets.Code.Player.Tools.Tool>(false))
                     if (t != null && t.isActiveAndEnabled) { _tool = t.GetType().Name; break; }
             return _tool;
+        }
+
+        /// <summary>True while the local player is working with the held tool (a mouse button held in game, not in a menu): remote avatars animate their tool with it.</summary>
+        internal static bool LocalUsingTool()
+        {
+            try { return Cursor.lockState == CursorLockMode.Locked && (Input.GetMouseButton(0) || Input.GetMouseButton(1)); }
+            catch { return false; }
         }
 
         bool _recovered;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -369,6 +369,8 @@ namespace HFCoop
                         Plugin.Log.LogInfo("[dev] recdiff " + n + " field(s) changed");
                         break;
                     }
+                case "avuse": Avatars.PreviewUse = a.Length < 2 || a[1] != "off"; Plugin.Log.LogInfo("[dev] avatar use preview: " + Avatars.PreviewUse); break;
+                case "avtool": Avatars.Preview = a.Length > 1 ? a[1] : ""; Plugin.Log.LogInfo("[dev] avatar tool preview: " + Avatars.Preview); break;
                 case "dirts": // census of Dirt objects by type: total, with scene guid, without (runtime-created)
                     {
                         var cnt = new System.Collections.Generic.Dictionary<string, int[]>();

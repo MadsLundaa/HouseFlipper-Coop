@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Sockets;
@@ -14,7 +14,7 @@ namespace HFCoop
     {
         public int Id; public string Name = "?"; public string Scene = "";
         public Vector3 Pos, TargetPos; public float Yaw, TargetYaw, Pitch, TargetPitch;
-        public string Tool = "";
+        public string Tool = ""; public bool Using;
         public double LastState;
         public GameObject Go; public Transform Head;
     }
@@ -22,7 +22,7 @@ namespace HFCoop
     /// <summary>Host-authoritative session: owns connections, the player list and message dispatch.</summary>
     internal static class Session
     {
-        public const int Protocol = 3;
+        public const int Protocol = 4; // 4: the player state also carries "is using the tool"
         public static Role Role = Role.None;
         public static string Status = "Offline";
         public static string LastError = "";
@@ -316,7 +316,7 @@ namespace HFCoop
             var cam = Camera.main;
             if (cam != null) { pitch = cam.transform.eulerAngles.x; if (pitch > 180) pitch -= 360; }
             var data = new W(Msg.PlayerState).I(MyId).S(Plugin.SceneName).F(t.position.x).F(t.position.y).F(t.position.z)
-                .F(cam != null ? cam.transform.eulerAngles.y : t.eulerAngles.y).F(pitch).S(Plugin.CurrentToolName()).Done();
+                .F(cam != null ? cam.transform.eulerAngles.y : t.eulerAngles.y).F(pitch).S(Plugin.CurrentToolName()).B(Plugin.LocalUsingTool() ? (byte)1 : (byte)0).Done();
             SendAll(data);
         }
 
@@ -401,11 +401,11 @@ namespace HFCoop
         static void OnState(Conn from, byte[] raw, R r)
         {
             int id = r.I(); if (id == MyId) return;
-            string scene = r.S(); var pos = new Vector3(r.F(), r.F(), r.F()); float yaw = r.F(), pitch = r.F(); string tool = r.S();
+            string scene = r.S(); var pos = new Vector3(r.F(), r.F(), r.F()); float yaw = r.F(), pitch = r.F(); string tool = r.S(); bool usingTool = r.B() == 1;
             RemotePlayer p;
             if (!Players.TryGetValue(id, out p)) return;
             if (Role == Role.Host && from.PlayerId != id) return; // only accept own state from a client
-            p.Scene = scene; p.TargetPos = pos; p.TargetYaw = yaw; p.TargetPitch = pitch; p.Tool = tool; p.LastState = Now;
+            p.Scene = scene; p.TargetPos = pos; p.TargetYaw = yaw; p.TargetPitch = pitch; p.Tool = tool; p.Using = usingTool; p.LastState = Now;
             if (p.Go == null) p.Pos = pos;
             if (Role == Role.Host) BroadcastExcept(from, raw);
         }

@@ -1,4 +1,4 @@
-# House Flipper Co-op (prototype 0.4.5)
+# House Flipper Co-op (prototype 0.4.6)
 
 A BepInEx plugin that lets several people renovate **the same house** in the **original House Flipper (2018, Steam)** at the same time.
 It is a prototype: the core loop (join, see each other, shared house state, shared money, host-owned save) is implemented and was tested with two real game instances; some systems are untested or not shared (see *Limitations* and `docs/test-checklist.md`).
@@ -7,7 +7,7 @@ It is a prototype: the core loop (join, see each other, shared house state, shar
 
 | Shared | How |
 |---|---|
-| Players (position, look direction, held tool) | capsule avatars with arms, a coloured held-tool block and name tags (the game has no third-person body) |
+| Players (position, look direction, held tool, tool use) | small articulated figures (walking legs, arms reaching for the tool, cap in the player's colour) with a blocky model of the held tool that animates while it is used, plus name tags (the game has no third-person body) |
 | Furniture/items: move, buy (new items), sell/dispose, damage | game's own item save record, replicated per item; an item being carried is shown moving live to the others |
 | Dirt cleaned, windows cleaned, wall paint/wallpaper, floors/tiles/ceilings, plaster | game's own save lists, replicated as deltas |
 | Demolition (hammer) of inner walls, in jobs and the main house | removed on the other peer the way the hammer does it (mesh, job counter and markers update) |

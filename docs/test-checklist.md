@@ -270,3 +270,6 @@ Verified: window zoom released when the other player finishes it; mounted radiat
 
 ## 0.4.5 two-instance tests (2026-10-26, user watched both windows)
 Verified: floor tiles appear for the other player; lamp + switch bought while connected work from host and from client; selling job items updates the other player's task list; buying/placing a job item moves both task counters; following the host into a job house loaded without hanging (harness). NOT reproduced: the reported infinite "Loading host's house" (hardened, not proven fixed).
+
+## 0.4.6 avatars (2026-10-26, user watched both windows)
+Verified by the user: figure avatars with walking, blocky models for the tools they tried, tile/panel tool as a flat block with a thin white tile, per-tool animations while a tool is used. Not exhaustively checked: every one of the ~45 tool classes (rare ones fall back to a generic handle + head).
