@@ -1,118 +1,58 @@
 # House Flipper Co-op (prototype 0.4.6)
 
-A BepInEx plugin that lets several people renovate **the same house** in the **original House Flipper (2018, Steam)** at the same time.
-It is a prototype: the core loop (join, see each other, shared house state, shared money, host-owned save) is implemented and was tested with two real game instances; some systems are untested or not shared (see *Limitations* and `docs/test-checklist.md`).
+A BepInEx mod that lets several people renovate **the same house** together in the original **House Flipper (2018, Steam)**.
 
-## What is shared
+It is a prototype: the core loop works and was tested with two real game instances, but some systems are untested or not shared.
 
-| Shared | How |
-|---|---|
-| Players (position, look direction, held tool, tool use) | small articulated figures (walking legs, arms reaching for the tool, cap in the player's colour) with a blocky model of the held tool that animates while it is used, plus name tags (the game has no third-person body) |
-| Furniture/items: move, buy (new items), sell/dispose, damage | game's own item save record, replicated per item; an item being carried is shown moving live to the others |
-| Dirt cleaned, windows cleaned, wall paint/wallpaper, floors/tiles/ceilings, plaster | game's own save lists, replicated as deltas |
-| Demolition (hammer) of inner walls, in jobs and the main house | removed on the other peer the way the hammer does it (mesh, job counter and markers update) |
-| Lamps and light switches (also ones bought while connected), floor tiles and wall panels, job task lists for placed/sold furniture | lamp on/off states are replicated per lamp; tiles use the game's save lists plus a mesh rebuild; placed/sold items raise the same game events a local drop/sale does |
-| Doors and windows: install (all stages, incl. smashing the wall inside), sell, open/close, also those placed earlier | installation records replicated; doors get stable ids |
-| Repairs: mounted devices (radiators...), electrical outlets, fuse boxes, replaced sockets | "fully mounted" event / game save lists; leaving a camera lock when someone else finishes or sells the object |
-| Doors, garage doors, windows, curtains, gates, drawers, light switches | "use" replicated to the same object |
-| Bank balance | host's balance is authoritative; client spending/earning is applied on the host |
-| Skills/XP, tool unlocks (and tool-unlock quest state), statistics, order progress | host's values replace the joiner's while connected; afterwards changes are merged (numbers add up, unlocks OR together); the joiner's own values are restored on leaving (config `KeepSharedProgress` keeps them). Perk levels also fire the game's own "perk changed" events so their effects are active on every peer. **Perk points and perk levels are host-authoritative**: clients never send them and keep the host's numbers |
-| Job progress (progress bar, % and the "can complete" state) | the host's quest manager is authoritative; clients show the host's numbers |
-| Time of day (sun, PC clock) and the map timer | host broadcasts, clients adopt it (e.g. after the host sleeps) |
-| Host changes house (accepts an order, goes back to the office, ...) | joiners automatically follow into the new house |
-| Joining late | host sends its current house as a compressed snapshot; client loads it in memory |
-| Saving | **only the host writes the shared house**; clients never write it to disk |
+## What it does
 
-**Host-only actions.** Clients can look around, use tools, buy furniture and read the skills tab, but these are refused on a client (a status message explains) so progression and money cannot be applied twice:
-completing a job, accepting jobs, selling/buying/renting houses, relocating the office, going back to the office, sleeping in a bed, and spending perk points. The host does them and everyone follows (money, skills and the new house arrive through the shared state).
+- You see the other players in the house, with name tags and the tool they hold.
+- Furniture, cleaning, painting, floors, demolition, doors/windows and repairs are shared live.
+- Money, skills and job progress are shared. The host's values are authoritative.
+- Late joiners get the host's current house automatically.
+- Only the host saves the shared house. Joiners work on an in-memory copy.
 
-Not shared / not verified: achievements, pets, farm/garden/cooking/renting features, other DLC content, the PC "Sleep" button (does nothing in our tests on either side, cause unknown), wall construction (experimental), water puddles that appear at runtime (an unfinished assembly can leak on one side only), dirt percentage / minimap dirt (one unconfirmed report, not reproduced). Courses do not exist in this game build (no code buys them). See `docs/test-checklist.md` for exactly what was tested with real input and what was not.
+Some actions are host-only (completing/accepting jobs, buying/selling houses, sleeping, spending perk points).
 
 ## Install
 
-1. Close House Flipper. Everyone who plays needs the **same game build** and this mod (build checked at join).
-2. Run `Install.bat` (finds your Steam copy; or `powershell -ExecutionPolicy Bypass -File install.ps1 -GameDir "D:\...\House Flipper"`).
-   It installs BepInEx 5.4.23.3 (bundled, LGPL) and the plugin, and writes a manifest of the files it added.
-3. **Back up your saves first** (copy `%USERPROFILE%\AppData\LocalLow\Empyrean\House Flipper Game`). The mod never deletes saves, but the joining player's profile is touched (see Save safety).
+1. Close House Flipper. Everyone needs the **same game build** and the same mod version.
+2. **Back up your saves** (`%USERPROFILE%\AppData\LocalLow\Empyrean\House Flipper Game`).
+3. Run `Install.bat`. It finds your Steam copy and installs BepInEx 5.4.23.3 and the plugin.
 
-Uninstall: `Uninstall.bat` removes exactly the files the installer added (and restores a `winhttp.dll` it replaced). Saves are never deleted.
+To uninstall, run `Uninstall.bat`. It removes only what the installer added. Saves are never deleted.
 
-## Hosting and joining
+## Play
 
-Transport is plain **TCP, direct IP**, default port **27055** (free, no server/subscription). Steam P2P was evaluated but cannot be tested with two game instances on one Steam account; see `docs/technical-report.md`.
-
-**Host**
-1. Start the game, *Continue* your house.
-2. Press **F5** (or **F7** → *Host session*).
-3. Let friends reach you:
-   - same LAN: give them your LAN IP (`ipconfig`);
-   - over the internet: forward **TCP 27055** on your router to your PC and allow `HouseFlipper.exe` in Windows Firewall (private+public). If you cannot port-forward, use a free overlay VPN such as Tailscale/ZeroTier/Hamachi and give friends your VPN IP.
-
-**Join (from the main menu - no save needed)**
-1. Start the game and stay in the **main menu** (joining from inside a house works too).
-2. Press **F7**, type the host's IP (`1.2.3.4` or `1.2.3.4:27055`), press *Join*. (Or set `JoinAddress` in `BepInEx\config\dev.hfcoop.cfg` and press **F6**.)
-3. Your game leaves the menu and loads straight into the host's current house (a copy in memory; your own saves are untouched). If the host has not loaded a house yet you see "Waiting for the host to load a house..." and are taken in as soon as they do. You see the host as a capsule with a name tag and the tool they hold.
-
-**Steam (optional, no IP address or port forwarding).** Players who both run the game **through Steam** (same game, both online) can connect through Steam's network instead of TCP. TCP stays the default and keeps working at the same time.
-* *Host*: in the panel (**F7**) tick **Also host via Steam**, then press *Host session* (or set `HostViaSteam = true` in `BepInEx\config\dev.hfcoop.cfg`). The panel shows **your Steam ID**; friends can also see in their panel that you are hosting.
-* *Join*: in the panel pick the hosting friend under *Steam*, or paste the host's Steam ID into the ID field and press **Join by Steam ID**. In the config you can set `JoinAddress = steam:7656...` and use **F6**. A bare 17-digit Steam ID in the Host field also works.
-* Start the game from Steam. Running `HouseFlipper.exe` directly reports a different app id and Steam will not connect the two players (error "timed out").
-* Needs Steam online on both sides; messages travel through Steam's relay (about 15-30 ms extra) or directly when possible. See `docs/technical-report.md` sections 9-10.
-
-**Automatic reconnect (clients).** If the connection to the host is lost (network drop, timeout, the host crashing) the client keeps its house open, shows "Connection lost - reconnecting..." and retries the same address (TCP or Steam) every few seconds for `ReconnectSeconds` (default 120). A successful retry is a normal join: the host sends a fresh snapshot, so everything missed during the outage is replaced by the host's current state. It does **not** reconnect when you leave yourself, when the host ends the session, or when the host rejects you (wrong version, session full). Turn it off with `AutoReconnect = false`; the panel has a *Cancel reconnecting* button. The host replaces a stale connection of the same player immediately when they come back. Ctrl+F12 simulates a network failure (drops every connection without goodbye) for testing.
-
-**Disconnect**: **F4** or the panel's *Disconnect*. Rejoining works (you get a fresh copy of the host's house).
-
-Keys (configurable in `BepInEx\config\dev.hfcoop.cfg`): F5 host · F6 join (config address) · F7 panel · F4 leave.
-Other options: port, name, send rate, timeouts, max players, verbose logging. Logs: `BepInEx\LogOutput.log`.
-
-## Save safety (read this)
-
-* The **host's** save is the shared save. The host saves normally (autosave / save interaction); everyone's changes are already in the host's game state, so they persist across host restarts.
-* A joining player's house is a *copy*; **saving is blocked** on it (message `[save] blocked …` in the log), also after leaving, until they return to the main menu. Your own save of that house is therefore not overwritten.
-* The shared bank balance and shared progression (skills, tool unlocks, statistics, orders) temporarily replace the joiner's own. They are backed up (`BepInEx\hfcoop-balance-backup.txt`, `BepInEx\hfcoop-progress-backup.json`) and restored when you leave, or at the next game start after a crash. Set `KeepSharedProgress = true` in the config to keep the shared progression instead.
-* If the host's game crashes, work since the host's last save is lost (the game itself only saves periodically). Save before you finish a session.
-* Killing the game while in a house triggers the game's own "house did not close properly" dialog: choose *Continue Game*.
-* Always keep backups. This is a mod for a game that was not designed for multiplayer.
-
-## Troubleshooting
-
-| Message | Meaning / fix |
+| Key | Action |
 |---|---|
-| `protocol mismatch` / `game version mismatch` | host and client have different mod or game versions - update both |
-| `connection timed out` | wrong IP/port, firewall or router not forwarding TCP 27055. A very slow PC may need `ConnectTimeoutSeconds` / `TimeoutSeconds` raised (defaults 30 / 40 s since 0.3.1; an existing config file keeps its old values) |
-| `Steam is not available` / `Steam could not reach the host (timed out)` | Steam is not running or logged in, the host is not hosting via Steam, or one player started the game outside Steam |
-| `session is full` | raise `MaxPlayers` in the config on the host |
-| `Waiting for the host to load a house...` | the host is still in the main menu; you will be taken in automatically |
-| Remote player invisible | you are in different houses (panel shows `[in other-house]`) or have not received their state yet |
-| Item/dirt seems out of sync | leave and rejoin to resync from the host's snapshot |
+| F5 | Host (after loading your house with *Continue*) |
+| F6 | Join using the address in the config |
+| F7 | Open the panel (host, join, Steam options) |
+| F4 | Leave the session |
 
-## Compatibility
+**Host:** press F5, then give friends your IP. Over the internet, forward **TCP 27055**, or use a VPN such as Tailscale, ZeroTier or Hamachi.
 
-* Tested with game build **1.26252 (ab1aa)**, Unity 2019.4.39, Windows 11, base game, house *SmallFirstHouse*: two instances on one PC, and (0.3.0) two physical machines on one LAN (see `docs/test-checklist.md`).
-* DLCs and Steam Workshop items: **not verified**. Workshop items need all players to subscribe to the same items.
-* Single-player is unaffected when no session is active (the plugin only hooks the game's save-recording events).
+**Join:** from the main menu press F7, enter the host's IP (`1.2.3.4` or `1.2.3.4:27055`) and press *Join*.
 
-## Build from source
+**Steam (optional):** if everyone launches the game through Steam, you can connect by Steam ID without port forwarding.
 
-Requires the game installed (the plugin references its assemblies; none are copied into this repo), the .NET SDK, and BepInEx 5.4.23.3 x64 installed in the game folder (`BepInEx\core`).
+## Good to know
 
-```
-cd src
-dotnet build -c Release -p:GameDir="D:\...\House Flipper"   # output ..\dist\HFCoop.dll
-# release zip (bundles the unmodified BepInEx x64 build + installer + docs):
-$env:BEPINEX_DIR = "C:\path\to\BepInEx_x64_5.4.23.3"        # or put it in third_party\bepinex
-powershell -File ..\tools\package.ps1 -Version 0.4.4          # builds release\HouseFlipperCoop-<ver>.zip
-```
+- Always keep backups. The game was not designed for multiplayer.
+- If the host crashes, work since the host's last save is lost. Save before you finish.
+- Tested with game build 1.26252 on Windows, base game only. DLCs are not verified.
 
-`tools\session.ps1` and the other scripts in `tools\` are the author's two-instance test harness (Windows, Steam, hard-coded to a 1280x720 side-by-side layout and the author's game path); they are optional and need the dev flag `hfcoop-dev.enabled` next to the plugin. Dev commands are described in `src\Dev.cs`.
+## More information
 
-Documentation: `docs/technical-report.md` (architecture, findings, sources), `docs/test-checklist.md` (verified vs unverified), `docs/test-log.md`, `CHANGELOG.md`.
+See [`docs/DETAILS.txt`](docs/DETAILS.txt) for the full list of shared features, hosting and Steam details, save safety, troubleshooting and building from source.
+
+Other docs: `docs/technical-report.md`, `docs/test-checklist.md`, `docs/test-log.md`, `CHANGELOG.md`.
 
 ## License
 
-MIT (see `LICENSE`). Third-party components and what is not redistributed: `THIRD-PARTY.md`. Unofficial fan project, not affiliated with the developers of *House Flipper*.
+MIT (see `LICENSE`). Third-party components: `THIRD-PARTY.md`. Unofficial fan project, not affiliated with the developers of *House Flipper*.
 
 ## Reporting problems
 
-Please open an issue with the plugin version, whether you use TCP or Steam, what you did and what each player saw, plus `BepInEx\LogOutput.log` from both players (set `VerboseLog = true` in `BepInEx\config\dev.hfcoop.cfg` first if you can).
+Open an issue with the plugin version, TCP or Steam, what you did, and `BepInEx\LogOutput.log` from both players.
