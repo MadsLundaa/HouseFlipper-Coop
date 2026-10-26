@@ -2,7 +2,7 @@
 
 A BepInEx mod that lets several people renovate **the same house** together in the original **House Flipper (2018, Steam)**.
 
-It is a prototype: the core loop works and was tested with two real game instances, but some systems are untested or not shared.
+It is a prototype: the core loop works and was tested with two real game instances, but some systems may be untested or not shared.
 
 ## What it does
 
