@@ -56,4 +56,4 @@ MIT (see `LICENSE`). Third-party components: `THIRD-PARTY.md`. Unofficial fan pr
 
 ## Reporting problems
 
-Open an issue with the plugin version, TCP or Steam, what you did, and `BepInEx\LogOutput.log` from both players.
+Open an issue with the plugin version, TCP or Steam, what you did, and `BepInEx\LogOutput.log` from all players if possible.
