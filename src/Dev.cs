@@ -352,6 +352,89 @@ namespace HFCoop
                         Plugin.Log.LogInfo("[dev] floormat done " + n);
                         break;
                     }
+                case "ia": // interactable audit: every Interactable in the scene by type: replicated? key? does the key resolve back to the same object? ("ia bad" lists only problems, "ia <text>" filters by type name)
+                    {
+                        string filt = a.Length > 1 ? a[1] : ""; bool bad = filt == "bad";
+                        var counts = new System.Collections.Generic.SortedDictionary<string, int[]>(); int shown = 0;
+                        foreach (var it in Resources.FindObjectsOfTypeAll<Empyrean.HouseFlipper.Core.Interactions.Interactable>())
+                        {
+                            if (!it.gameObject.scene.IsValid()) continue;
+                            string tn = it.GetType().Name; if (filt.Length > 0 && !bad && tn.IndexOf(filt, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                            bool rep = Interactions.Replicated(it); string key = Interactions.KeyOf(it); bool ok = key != null && ReferenceEquals(Interactions.Resolve(key), it);
+                            int[] c; if (!counts.TryGetValue(tn, out c)) counts[tn] = c = new int[4];
+                            c[0]++; if (rep) c[1]++; if (key == null) c[2]++; else if (!ok) c[3]++;
+                            if (rep && !ok && shown++ < 40) Plugin.Log.LogInfo("[dev] ia PROBLEM " + tn + " key=" + (key ?? "-") + " path=" + Inspector.Path(it.transform));
+                        }
+                        foreach (var kv in counts) if (!bad || (kv.Value[1] > 0 && (kv.Value[2] > 0 || kv.Value[3] > 0))) Plugin.Log.LogInfo("[dev] ia " + kv.Key + " total=" + kv.Value[0] + " replicated=" + kv.Value[1] + " nokey=" + kv.Value[2] + " unresolved=" + kv.Value[3]);
+                        Plugin.Log.LogInfo("[dev] ia done");
+                        break;
+                    }
+                case "ids": // ids <prefix>: every tracked runtime id with that prefix and the item name (compare the two peers)
+                    foreach (var idl in ItemSync.DevIds(a.Length > 1 ? a[1] : "n:").Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)) Plugin.Log.LogInfo("[dev] id " + idl);
+                    Plugin.Log.LogInfo("[dev] ids done"); break;
+                case "smartdoor": // smartdoor set|use|state: make every door "smart" (SetAsSmart), call SmartInteract on the first one, or print the open state of the first door
+                    {
+                        var doors = new System.Collections.Generic.List<Empyrean.HouseFlipper.Core.Interactions.DoorInteraction>();
+                        foreach (var d0 in Resources.FindObjectsOfTypeAll<Empyrean.HouseFlipper.Core.Interactions.DoorInteraction>()) if (d0.gameObject.scene.IsValid()) doors.Add(d0);
+                        if (doors.Count == 0) { Plugin.Log.LogInfo("[dev] smartdoor: no door"); break; }
+                        string sub = a.Length > 1 ? a[1] : "state";
+                        if (sub == "set") { foreach (var d1 in doors) d1.SetAsSmart(); Plugin.Log.LogInfo("[dev] smartdoor: " + doors.Count + " door(s) are smart now"); }
+                        else if (sub == "use") { doors[0].SmartInteract(); Plugin.Log.LogInfo("[dev] smartdoor: SmartInteract on " + Inspector.Path(doors[0].transform)); }
+                        else
+                        {
+                            string st = "?";
+                            foreach (var pr in typeof(MovablePart).GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)) if (pr.PropertyType == typeof(bool) && pr.CanRead && !pr.CanWrite) { st = pr.GetValue(doors[0], null).ToString(); break; }
+                            Plugin.Log.LogInfo("[dev] smartdoor state: " + st + " rot=" + doors[0].transform.localEulerAngles + " " + Inspector.Path(doors[0].transform));
+                        }
+                        break;
+                    }
+                case "tree": // tree <netId>: the item's hierarchy (child index path, name, components) to compare host and client
+                    {
+                        var ti = ItemSync.ByNetId(a[1]);
+                        if (ti == null) { Plugin.Log.LogInfo("[dev] tree: no item " + a[1]); break; }
+                        int cnt = 0;
+                        foreach (var tr in ti.GetComponentsInChildren<Transform>(true))
+                        {
+                            var path = new System.Collections.Generic.List<int>(); for (var q = tr; q != null && q != ti.transform; q = q.parent) path.Insert(0, q.GetSiblingIndex());
+                            var comps = new System.Text.StringBuilder(); foreach (var c in tr.GetComponents<Component>()) if (c != null && !(c is Transform)) comps.Append(c.GetType().Name).Append(',');
+                            Plugin.Log.LogInfo("[dev] tree " + a[1] + " [" + string.Join(",", path.ConvertAll(x => x.ToString()).ToArray()) + "] " + tr.name + " active=" + tr.gameObject.activeSelf + " " + comps);
+                            if (++cnt > 60) break;
+                        }
+                        Plugin.Log.LogInfo("[dev] tree done " + cnt);
+                        break;
+                    }
+                case "killitem": // killitem <netId>: destroy an item the raw way (no sale event) to test the "vanished item" detection
+                    {
+                        var it = ItemSync.ByNetId(a[1]);
+                        if (it == null) { Plugin.Log.LogInfo("[dev] killitem: no item " + a[1]); break; }
+                        Plugin.Log.LogInfo("[dev] killitem " + a[1] + " (" + it.name + ")"); UnityEngine.Object.Destroy(it.gameObject);
+                        break;
+                    }
+                case "lamps": // every lamp: id, logical state, whether a Light is actually enabled, distance to the player
+                    {
+                        var pc = UnityEngine.Object.FindObjectOfType<Assets.Code.Player.PlayerController>(); int n = 0;
+                        foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                        {
+                            if (!it.gameObject.scene.IsValid() || it.lightInteractable == null) continue;
+                            int en = 0, all = 0; foreach (var l in it.GetComponentsInChildren<Light>(true)) { all++; if (l.enabled && l.gameObject.activeInHierarchy) en++; }
+                            Plugin.Log.LogInfo("[dev] lamp " + it.name + " id=" + ItemSync.NetIdPublic(it, false) + " lightOn=" + it.currentItemState.lightOn + " lights=" + en + "/" + all + " active=" + it.gameObject.activeInHierarchy + " dist=" + (pc != null ? Vector3.Distance(pc.transform.position, it.transform.position).ToString("0.0") : "?"));
+                            n++;
+                        }
+                        Plugin.Log.LogInfo("[dev] lamps total " + n);
+                        break;
+                    }
+                case "finditems": // finditems <text>: items whose name contains the text (id, position, active)
+                    {
+                        int n = 0;
+                        foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                        {
+                            if (!it.gameObject.scene.IsValid() || it.name.IndexOf(a[1], StringComparison.OrdinalIgnoreCase) < 0) continue;
+                            Plugin.Log.LogInfo("[dev] item " + it.name + " id=" + ItemSync.NetIdPublic(it, false) + " pos=" + it.transform.position + " active=" + it.gameObject.activeInHierarchy + " path=" + Inspector.Path(it.transform));
+                            n++;
+                        }
+                        Plugin.Log.LogInfo("[dev] finditems total " + n);
+                        break;
+                    }
                 case "recsnap": // remember every Recording field (JSON hash) ...
                 case "recdiff": // ... and list which fields changed since (find out where the game records an action)
                     {

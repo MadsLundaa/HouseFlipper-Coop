@@ -22,7 +22,7 @@ namespace HFCoop
             if (!ReferenceEquals(rec, _lastRecorder) && rec != null) { _lastRecorder = rec; _announce = true; _changedAt = Session.Now; Plugin.Log.LogInfo("[follow] host loaded a different house"); }
             if (_announce && !h.isWaitingForApplyingSave && Session.Now - _changedAt > 6.0 && Plugin.SceneName.Length > 0 && Session.PlayerCount > 1)
             {
-                _announce = false;
+                _announce = false; ItemSync.AssignAnonymousIds();
                 Plugin.Log.LogInfo("[follow] telling clients to follow into " + Plugin.SceneName);
                 Events.Send("house", Plugin.SceneName, "");
             }

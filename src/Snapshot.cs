@@ -71,7 +71,7 @@ namespace HFCoop
             if (h == null || Plugin.SceneName.Length == 0 || h.Recorder == null || h.Recorder.currentRecording == null) { Plugin.Log.LogInfo("[snap] host has no house loaded yet, telling #" + c.PlayerId + " to wait"); c.Send(new W(Msg.NotReady).Done()); return; }
             Recording rec = h.MakeCurrentGameRecording();
             if (rec == null) { Plugin.Log.LogWarning("[snap] host has no recording"); return; }
-            ItemSync.AssignLoadedIds(rec);
+            ItemSync.AssignLoadedIds(rec); ItemSync.AssignAnonymousIds();
             string json = rec.ToJsonString();
             string map = ItemSync.ExportIdMap(rec);
             var gz = Gzip(json);
@@ -155,7 +155,7 @@ namespace HFCoop
             }
             if (!done) return;
             Loading = false; Events.Applying = false; Ready = true;
-            if (h != null && h.Recorder != null) ItemSync.ImportIdMap(h.Recorder.currentRecording, _mapJson);
+            if (h != null && h.Recorder != null) { ItemSync.ImportIdMap(h.Recorder.currentRecording, _mapJson); ItemSync.AssignAnonymousIds(); }
             RecSync.Prime(); InstSync.Prime(); ProgressSync.OnHouseReady();
             Session.Status = "Connected to " + Session.HostName;
             Plugin.Log.LogInfo("[snap] house loaded from host snapshot");

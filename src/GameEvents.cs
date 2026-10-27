@@ -13,7 +13,7 @@ namespace HFCoop
     /// </summary>
     internal static class GameEvents
     {
-        static MethodInfo _place, _sold, _soldArgs; static bool _looked;
+        static MethodInfo _place, _sold, _soldArgs, _wallAdded; static bool _looked;
 
         static void Look()
         {
@@ -35,6 +35,9 @@ namespace HFCoop
                 {
                     if (!ty.IsAbstract || !ty.IsSealed) continue;
                     if (!ty.GetFields(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public).Any(f => f.FieldType == typeof(Action<Wall>))) continue;
+                    // "a wall was built": the first static void (Wall, float, bool) raiser; the floor's wall list, the combined wall mesh and the quests listen to it
+                    _wallAdded = ty.GetMethods(BindingFlags.Public | BindingFlags.Static).Where(m => { var ps = m.GetParameters(); return m.ReturnType == typeof(void) && ps.Length == 3 && ps[0].ParameterType == typeof(Wall) && ps[1].ParameterType == typeof(float) && ps[2].ParameterType == typeof(bool); }).OrderBy(m => m.MetadataToken).FirstOrDefault();
+                    if (_wallAdded != null) Plugin.Log.LogInfo("[events] wall-built raiser " + ty.Name + "." + _wallAdded.Name);
                     var cand = ty.GetMethods(BindingFlags.Public | BindingFlags.Static).Where(m =>
                     {
                         var ps = m.GetParameters(); if (m.ReturnType != typeof(void) || ps.Length != 1) return false;
@@ -51,6 +54,15 @@ namespace HFCoop
                 }
             }
             catch (Exception e) { Plugin.Log.LogWarning("[events] lookup failed: " + e.Message); }
+        }
+
+        /// <summary>A wall another player built was created by the loader only: announce it like the wall tool does.</summary>
+        public static bool RaiseWallAdded(Wall wall)
+        {
+            Look();
+            if (_wallAdded == null || wall == null) return false;
+            _wallAdded.Invoke(null, new object[] { wall, 0f, false });
+            return true;
         }
 
         /// <summary>An item from another peer was put down: do what the game does when a player drops it (room, quests, culling...).</summary>

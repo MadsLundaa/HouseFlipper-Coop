@@ -21,6 +21,7 @@ namespace HFCoop
         static readonly Dictionary<string, Item> CreatedById = new Dictionary<string, Item>();
         static readonly Dictionary<string, string> LastJson = new Dictionary<string, string>();
         static readonly HashSet<Item> Pending = new HashSet<Item>();
+        static readonly Dictionary<string, Item> Seen = new Dictionary<string, Item>(); // scene items we have sent or applied (to notice when one disappears)
         static readonly List<string> PendingDeleted = new List<string>();
         static int _counter;
 
@@ -50,6 +51,52 @@ namespace HFCoop
         public static string NetIdPublic(Item it, bool create) { return NetId(it, create); }
         public static void RegisterCreated(string id, Item it) { CreatedById[id] = it; CreatedId[it] = id; }
         public static void QueuePublic(Item it) { Queue(it); }
+        /// <summary>Tell the other peers this item is gone (a sold door/window whose installation record disappeared).</summary>
+        public static void AnnounceGone(string id) { if (Session.Active && !Events.Applying && !PendingDeleted.Contains(id)) PendingDeleted.Add(id); }
+        public static string DevIds(string prefix) { var sb = new System.Text.StringBuilder(); foreach (var kv in CreatedById) if (kv.Key.StartsWith(prefix) && kv.Value != null) sb.AppendLine(kv.Key + " " + kv.Value.name); return sb.ToString(); }
+        /// <summary>Make sure the other peers learn about this item (a use event may name an item that was created a moment ago).</summary>
+        public static void EnsureSent(Item it)
+        {
+            if (!Session.Active || Events.Applying || it == null) return;
+            string id; if (!CreatedId.TryGetValue(it, out id)) return; // scene items are known to everybody already
+            if (id.StartsWith("c:") && !LastJson.ContainsKey(id)) { Pending.Add(it); }
+        }
+
+        /// <summary>
+        /// Runtime items that came with the house (a job furniture, replaced windows/doors...) have neither a scene guid nor an entry in the save item list, so they had no
+        /// id: their moves created duplicates on the other peer and their doors/windows/cupboards could not be addressed. Both peers load the same house, so a name built
+        /// from the prefab and the position is the same on both ("n:prefab:x:y:z"); it is assigned right after loading (client) / when the session starts or the house changes (host).
+        /// </summary>
+        public static int AssignAnonymousIds()
+        {
+            int n = 0;
+            try
+            {
+                var groups = new Dictionary<string, List<Item>>();
+                foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                {
+                    if (it == null || !it.gameObject.scene.IsValid() || !it.gameObject.activeInHierarchy || it.itemData == null) continue;
+                    if (CreatedId.ContainsKey(it) || !string.IsNullOrEmpty(GuidOf(it))) continue;
+                    string pg = it.itemData.prefabGuid; if (string.IsNullOrEmpty(pg)) continue;
+                    var p = it.transform.position;
+                    string baseId = "n:" + pg.Substring(0, Math.Min(8, pg.Length)) + ":" + Mathf.Round(p.x * 20f) + ":" + Mathf.Round(p.y * 20f) + ":" + Mathf.Round(p.z * 20f);
+                    List<Item> l; if (!groups.TryGetValue(baseId, out l)) groups[baseId] = l = new List<Item>(); l.Add(it);
+                }
+                foreach (var kv in groups)
+                {
+                    var l = kv.Value; if (l.Count > 1) l.Sort((x, y) => { int c = x.transform.eulerAngles.y.CompareTo(y.transform.eulerAngles.y); return c != 0 ? c : string.CompareOrdinal(x.name, y.name); });
+                    for (int i = 0; i < l.Count; i++)
+                    {
+                        string id = i == 0 ? kv.Key : kv.Key + "#" + i;
+                        if (CreatedById.ContainsKey(id)) continue;
+                        CreatedId[l[i]] = id; CreatedById[id] = l[i]; n++;
+                    }
+                }
+                if (n > 0) Plugin.Log.LogInfo("[item] gave " + n + " loaded runtime item(s) a shared id");
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[item] anonymous ids failed: " + e.Message); }
+            return n;
+        }
         /// <summary>Drop a runtime item created by this sync (recorded as sold, forgotten, destroyed) without telling the other peers.</summary>
         public static void Discard(string id)
         {
@@ -108,7 +155,34 @@ namespace HFCoop
                     var it = rec.wallInstallations[i] != null ? InstSync.ItemOf(rec.wallInstallations[i]) : null; string id;
                     if (it != null && CreatedId.TryGetValue(it, out id) && id.StartsWith("w:")) map["w" + i] = id;
                 }
+            // the host's shared ids of items without a scene guid, with prefab and position: the client matches by nearest item, so items that settled a little differently still agree
+            foreach (var kv in CreatedById)
+            {
+                if (!kv.Key.StartsWith("n:") || kv.Value == null || kv.Value.itemData == null) continue;
+                var p = kv.Value.transform.position; string pg = kv.Value.itemData.prefabGuid ?? "";
+                map[kv.Key] = pg.Substring(0, Math.Min(8, pg.Length)) + "|" + p.x.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "|" + p.y.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "|" + p.z.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            }
             return JsonConvert.SerializeObject(map);
+        }
+
+        static void ImportAnonymousIds(Dictionary<string, string> map)
+        {
+            var free = new List<Item>();
+            foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                if (it != null && it.gameObject.scene.IsValid() && it.gameObject.activeInHierarchy && it.itemData != null && !CreatedId.ContainsKey(it) && string.IsNullOrEmpty(GuidOf(it)) && !string.IsNullOrEmpty(it.itemData.prefabGuid)) free.Add(it);
+            int n = 0;
+            foreach (var kv in map)
+            {
+                if (!kv.Key.StartsWith("n:")) continue;
+                var s = kv.Value.Split('|'); if (s.Length != 4) continue;
+                var ci = System.Globalization.CultureInfo.InvariantCulture; float x, y, z;
+                if (!float.TryParse(s[1], System.Globalization.NumberStyles.Float, ci, out x) || !float.TryParse(s[2], System.Globalization.NumberStyles.Float, ci, out y) || !float.TryParse(s[3], System.Globalization.NumberStyles.Float, ci, out z)) continue;
+                var at = new Vector3(x, y, z); Item best = null; float bd = 0.75f;
+                foreach (var it in free) { if (!it.itemData.prefabGuid.StartsWith(s[0])) continue; float d = Vector3.Distance(it.transform.position, at); if (d < bd) { bd = d; best = it; } }
+                if (best == null || CreatedById.ContainsKey(kv.Key)) continue;
+                CreatedId[best] = kv.Key; CreatedById[kv.Key] = best; free.Remove(best); n++;
+            }
+            Plugin.Log.LogInfo("[item] matched " + n + " shared ids of loaded runtime items by position");
         }
 
         public static void ImportIdMap(Recording rec, string json)
@@ -116,9 +190,11 @@ namespace HFCoop
             if (rec == null || string.IsNullOrEmpty(json)) return;
             var map = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
             int n = 0;
+            ImportAnonymousIds(map);
             foreach (var kv in map)
             {
                 int i;
+                if (kv.Key.StartsWith("n:")) continue;
                 if (kv.Key.StartsWith("w"))
                 {
                     if (!int.TryParse(kv.Key.Substring(1), out i) || rec.wallInstallations == null || i >= rec.wallInstallations.Count) continue;
@@ -132,7 +208,7 @@ namespace HFCoop
             Plugin.Log.LogInfo("[item] imported " + n + " created-item ids");
         }
 
-        public static void Reset() { CreatedId.Clear(); CreatedById.Clear(); LastJson.Clear(); Pending.Clear(); PendingDeleted.Clear(); }
+        public static void Reset() { Seen.Clear(); CreatedId.Clear(); CreatedById.Clear(); LastJson.Clear(); Pending.Clear(); PendingDeleted.Clear(); }
 
         // ---------- hooks ----------
         public static void Patch(Harmony h)
@@ -175,9 +251,33 @@ namespace HFCoop
             {
                 if (it == null) continue;
                 var id = NetId(it, false);
-                if (id != null) PendingDeleted.Add(id);
+                if (id != null) { PendingDeleted.Add(id); Seen.Remove(id); }
                 Pending.Remove(it);
-                if (id != null && id.StartsWith("c:")) { CreatedById.Remove(id); CreatedId.Remove(it); }
+                if (id != null && !id.StartsWith("s:")) { CreatedById.Remove(id); CreatedId.Remove(it); }
+            }
+        }
+
+        // ---------- an item that vanished without going through the sale event ----------
+        // Selling goes through the recorder's sold/disposed event, which tells the others. Some sales do not (a door or window that was installed during the session is sold
+        // through its wall-installation path), so the seller saw the item gone and nobody else did. Every item we track is therefore also watched for disappearing.
+        static object _scanRec; static double _scanNext;
+        static void ScanDestroyed()
+        {
+            if (Time.realtimeSinceStartup < _scanNext) return; _scanNext = Time.realtimeSinceStartup + 0.5f;
+            var h = Hsm as HouseSaveManager; object rec = h != null ? h.Recorder : null;
+            bool changedHouse = !ReferenceEquals(rec, _scanRec); _scanRec = rec;
+            bool loading = Snapshot.Loading || h == null || h.isWaitingForApplyingSave;
+            var gone = new List<string>(); var goneItems = new List<Item>();
+            foreach (var kv in CreatedById) if (kv.Value == null) { gone.Add(kv.Key); goneItems.Add(kv.Value); }
+            foreach (var kv in Seen) if (kv.Value == null) { gone.Add(kv.Key); goneItems.Add(null); }
+            if (gone.Count == 0 || loading) return; // items vanish by the hundred while a house loads: that is not a sale
+            for (int i = 0; i < gone.Count; i++)
+            {
+                string id = gone[i];
+                CreatedById.Remove(id); Seen.Remove(id); LastJson.Remove(id); if (goneItems[i] != null) CreatedId.Remove(goneItems[i]);
+                if (changedHouse) continue;                       // the house was replaced: old items are simply gone
+                Plugin.Log.LogInfo("[item] " + id + " disappeared without a sale event: telling the others");
+                Events.Send("item", id, "{\"isDestroyed\":true}");
             }
         }
 
@@ -185,6 +285,7 @@ namespace HFCoop
         public static void Tick()
         {
             if (!Session.Active) { Pending.Clear(); PendingDeleted.Clear(); return; }
+            ScanDestroyed();
             foreach (var id in PendingDeleted)
             {
                 LastJson.Remove(id);
@@ -205,6 +306,7 @@ namespace HFCoop
                     string last;
                     if (LastJson.TryGetValue(id, out last) && last == json) continue;
                     LastJson[id] = json;
+                    if (id.StartsWith("s:")) Seen[id] = it;
                     Events.Send("item", id, json);
                 }
                 catch (Exception e) { Plugin.Log.LogError("[item] send failed: " + e); }
@@ -228,7 +330,10 @@ namespace HFCoop
                 return false;
             }
             mod.instance = inst;
+            if (scene && inst != null && !mod.isDestroyed) Seen[netId] = inst;
+            if (mod.isDestroyed) Seen.Remove(netId);
             if (mod.isDestroyed && inst != null) ReleaseZoom(inst);
+            if (mod.isDestroyed && inst != null) InstSync.OnItemSold(inst);
             if (mod.isDestroyed && inst != null) { try { GameEvents.RaiseSold(inst); } catch (Exception e) { Plugin.Log.LogWarning("[item] sold event failed: " + (e.InnerException ?? e).Message); } }
             if (mod.isDestroyed && inst != null) RecordSale(inst, scene ? netId.Substring(2) : null);
             if (inst != null && !scene && !mod.isDestroyed)

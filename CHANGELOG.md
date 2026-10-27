@@ -1,5 +1,26 @@
 # Changelog
 
+## About 0.4.7 and 0.4.8
+These two versions were internal builds and were never published: they did not feel finished enough to put in public, so the first public version after 0.4.6 is 0.4.9. Everything from 0.4.7 and 0.4.8 is included in 0.4.9 and listed below.
+
+## 0.4.9
+* **Doors and windows built during the session now work for the other player**: opening/closing syncs and selling removes them (frame included). The cause was that the game finishes setting up a freshly placed installation a moment after it is applied, so the mod could not tell which item was the door; it is now found by prefab and position. A sold door/window is also announced when its installation record disappears, and the other peer removes the installation together with the item.
+* **Doors and windows audit**: every door/window/opener class in the game was checked against what the mod syncs.
+* **Smart doors now sync** (smart-home doors only react to a different call than normal doors; the mod always replayed the normal one). A use that did not really happen is no longer replicated either.
+* **Safe doors, scissor-lift doors, animated openers and doorbells** are replicated now.
+* **Items that come with a house** (job furniture, windows/doors made by the replace-window/door quests) get an id that both players agree on, so their doors, windows and cupboards sync and moving them no longer creates duplicates. A brand-new item is sent to the other player before its first use.
+
+## 0.4.8
+* **Lamps stay lit**: a lamp that is switched on no longer goes dark when you leave its room (the game only lit lamps in the room you were in). Config `AlwaysLitLamps` (default on) turns this off.
+* **Perk popups**: a client no longer levels up by itself, which made the "new perk" popup repeat every time the tool was used. The host still decides perk points; the client just follows.
+* **Tiles and paint on newly built walls** now sync (walls built by the other player are registered in the floor's wall list, as the wall tool does).
+* **Items that disappear without a sale event** (for example doors installed during the session and then sold) are now noticed and removed for everyone; this covers doors, windows, appliances and lights alike.
+* Discord (from 0.4.7): the game's native Discord SDK stays disabled and the plugin shows its own presence.
+
+## 0.4.7
+* **Fixes a game crash**: the game's native Discord SDK (`discord_game_sdk.dll`) can panic when Discord is closed or in an odd state (seen as a crash right after a co-op session ended, in `ActivityManager.ClearActivity`). The plugin now always switches that SDK off.
+* **Own Discord Rich Presence** written in managed code (Discord's local IPC pipe, background thread, reconnects by itself): it shows House Flipper with the current house, and for co-op "Hosting / Joined a session - N players" with a party size. No player names are sent. Turn it off with `DiscordPresence = false` (`[UI]` in the config); the native SDK stays off either way.
+
 ## 0.4.6
 * **New player avatars**: a small articulated figure per player (cap and shirt in the player's colour, walking legs, arms that reach for what they hold) instead of a capsule.
 * **Held tools are drawn as blocky models** (sledgehammer, nail hammer, axe, chainsaw, shovel, paint roller, brush, trowel, cleaners, vacuum, pressure washer and sprayers, shotgun, price scanner, wall/floor tools) and the tiling/panel tool is a flat block with a thin white tile.

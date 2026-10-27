@@ -273,3 +273,19 @@ Verified: floor tiles appear for the other player; lamp + switch bought while co
 
 ## 0.4.6 avatars (2026-10-26, user watched both windows)
 Verified by the user: figure avatars with walking, blocky models for the tools they tried, tile/panel tool as a flat block with a thin white tile, per-tool animations while a tool is used. Not exhaustively checked: every one of the ~45 tool classes (rare ones fall back to a generic handle + head).
+
+## User-verified in play (2026-10-26)
+* **Buying houses** works for both sides (the host buys, the client follows and sees the same state).
+* **Steam transport** works without issue in normal play (earlier tests were short; this is the user's longer play).
+
+## 0.4.7 Discord (2026-10-26)
+Verified in the log: the game's native Discord SDK is disabled, the plugin's presence connects to Discord over the IPC pipe and the game runs normally. NOT verified: how the presence looks in the Discord client / to friends, a Discord restart while playing, a session ending with Discord closed.
+
+## 0.4.8 (2026-10-26)
+Verified with two instances: lamps keep their light outside the room (lights 1/1 at 8.4 m), the vanished-item detection removes a raw-destroyed item on the other peer, the level-up guard is installed. NOT verified in play: the perk popup spam on a real client, tiles/paint on a newly built wall (both directions), selling a door built during the session (and windows/appliances/lights), the office-PC report (cause unknown, not reproduced).
+
+## 0.4.9 doors and windows (2026-10-27)
+Verified with two instances: the host and client agree on all 166 shared ids of loaded runtime items (matched by position), a smart door used on the host opens on the client (rotation 0 -> 90 on both), the interactable audit shows no unresolved keys for doors/windows in the test house. NOT verified: the new door types (safe, scissor lift, animation clip/cycler, doorbell) in a house that has them, appliance doors, pet/farm doors, quest door locks, windows replaced by the window quest, jobs with many items (only the main house and one job house were audited).
+
+User-verified 2026-10-27: a door built during the session syncs opening, closing and selling; perk popups no longer repeat on the client; the office PC syncs; tiles and paint on newly built walls sync. Windows built during the session were tried separately and work as well.
+User-verified 2026-10-27: a window built during the session also syncs opening, closing and selling.

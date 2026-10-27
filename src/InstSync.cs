@@ -16,6 +16,7 @@ namespace HFCoop
     internal static class InstSync
     {
         static readonly Dictionary<InstallationsModification, string> Known = new Dictionary<InstallationsModification, string>();
+        static readonly Dictionary<InstallationsModification, string> KnownId = new Dictionary<InstallationsModification, string>(); // the door/window item id of each installation we know
         static readonly JsonSerializerSettings Ser = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore, Formatting = Formatting.None };
         static readonly HashSet<InstallationsModification> _alive = new HashSet<InstallationsModification>();
         static readonly HashSet<InstallationsModification> _warned = new HashSet<InstallationsModification>();
@@ -46,13 +47,13 @@ namespace HFCoop
 
         static string Json(InstallationsModification e) { return JsonConvert.SerializeObject(e, Ser); }
 
-        public static void Reset() { Known.Clear(); _alive.Clear(); _primed = false; }
+        public static void Reset() { Known.Clear(); KnownId.Clear(); _alive.Clear(); _primed = false; }
 
         public static void Prime()
         {
             var rec = Cur(); if (rec == null || rec.wallInstallations == null) return;
             Known.Clear();
-            foreach (var e in rec.wallInstallations) { try { Known[e] = Json(e); } catch { } }
+            foreach (var e in rec.wallInstallations) { try { Known[e] = Json(e); var pit = ItemOf(e); string pid = pit != null ? ItemSync.NetIdPublic(pit, false) : null; if (pid != null) KnownId[e] = pid; } catch { } }
             _primed = true;
         }
 
@@ -69,7 +70,7 @@ namespace HFCoop
                 var item = ItemOf(e);
                 if (item == null) { if (_warned.Add(e)) Plugin.Log.LogWarning("[inst] installation without item yet: instance=" + (e.instance != null) + " guid=" + e.windowGuid); continue; } // retried on the next poll
                 string id = ItemSync.NetIdPublic(item, true); if (id == null) { if (_warned.Add(e)) Plugin.Log.LogWarning("[inst] no net id for " + item.name); continue; }
-                Known[e] = js;
+                Known[e] = js; KnownId[e] = id;
                 ItemSync.QueuePublic(item); // the door must exist on the other peer before its installation arrives
                 Events.Send("inst", id, js);
                 if (Cfg.VerboseLog.Value) Plugin.Log.LogInfo("[inst] sent installation " + id + " (" + e.windowGuid + ")");
@@ -79,11 +80,47 @@ namespace HFCoop
             {
                 var w = rec.wallInstallations[i];
                 if (w.instance != null) _alive.Add(w);
-                else if (_alive.Contains(w)) { rec.wallInstallations.RemoveAt(i); Known.Remove(w); _alive.Remove(w); }
+                else if (_alive.Contains(w)) { rec.wallInstallations.RemoveAt(i); Known.Remove(w); _alive.Remove(w); KnownId.Remove(w); }
             }
             var gone = new List<InstallationsModification>();
             foreach (var k in Known.Keys) if (!rec.wallInstallations.Contains(k)) gone.Add(k);
-            foreach (var k in gone) Known.Remove(k); // a removed installation = a sold door/window: the item sync deletes the item on the other peer
+            foreach (var k in gone)
+            {
+                Known.Remove(k);
+                // the game removed the installation record: the door/window was sold. Say so explicitly; relying on the generic sale event missed doors built during the session.
+                string gid; if (KnownId.TryGetValue(k, out gid)) { KnownId.Remove(k); ItemSync.AnnounceGone(gid); Plugin.Log.LogInfo("[inst] installation of " + gid + " was removed (sold): telling the others"); }
+            }
+        }
+
+        /// <summary>
+        /// An item that carries a wall installation (door/window) was sold by someone else. The installation (frame, wall plug, the record in our recording) is its own object next
+        /// to the item, so destroying the item alone left it standing on this peer: remove it together with the item.
+        /// </summary>
+        public static void OnItemSold(Item item)
+        {
+            try
+            {
+                var rec = Cur(); if (rec == null || rec.wallInstallations == null || item == null) return;
+                var e = rec.wallInstallations.Find(x => ItemOf(x) == item);
+                if (e == null) return;
+                if (e.instance != null) UnityEngine.Object.Destroy(e.instance.gameObject);
+                rec.wallInstallations.Remove(e); Known.Remove(e); KnownId.Remove(e); _alive.Remove(e);
+                Plugin.Log.LogInfo("[inst] removed the installation of a door/window sold by another player");
+                RecSync.RequestMeshRebuild();
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[inst] could not remove a sold installation: " + ex.Message); }
+        }
+
+        static Item FindNear(InstallationsModification mod)
+        {
+            Item best = null; float bd = 0.6f;
+            foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+            {
+                if (it == null || !it.gameObject.scene.IsValid() || !it.gameObject.activeInHierarchy || it.itemData == null || it.itemData.prefabGuid != mod.windowGuid) continue;
+                if (ItemSync.NetIdPublic(it, false) != null) continue; // already known: not the one just created
+                float d = Vector3.Distance(it.transform.position, mod.position); if (d < bd) { bd = d; best = it; }
+            }
+            return best;
         }
 
         public static bool Apply(string id, string json)
@@ -102,7 +139,7 @@ namespace HFCoop
                     if (have != null)
                     {
                         if (have.state == mod.state) return true; // nothing new
-                        rec0.wallInstallations.Remove(have); Known.Remove(have); // a later stage of the install (wall torn down, installed): rebuild it in that state
+                        rec0.wallInstallations.Remove(have); Known.Remove(have); KnownId.Remove(have); // a later stage of the install (wall torn down, installed): rebuild it in that state
                         // the installation (door frame, the wall plug the hammer smashes) is its own object next to the item: destroying the item leaves it behind
                         if (have.instance != null) UnityEngine.Object.Destroy(have.instance.gameObject);
                     }
@@ -115,17 +152,16 @@ namespace HFCoop
             var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null);
             _apply.Invoke(hsm, new object[] { new List<InstallationsModification> { mod } });
             var rec = Cur();
-            if (mod.instance != null)
+            // the game finishes initialising a freshly placed installation a moment later (its Item is not known yet): find the door/window item by prefab and position
+            var it = ItemOf(mod) ?? FindNear(mod);
+            if (it != null) { mod.item = it; if (!scene) ItemSync.RegisterCreated(id, it); }
+            else Plugin.Log.LogWarning("[inst] could not find the door/window item for " + id + ": it will not sync");
+            if (rec != null && rec.wallInstallations != null)
             {
-                var it = ItemOf(mod);
-                if (it != null && !scene) ItemSync.RegisterCreated(id, it);
-                if (rec != null && rec.wallInstallations != null)
-                {
-                    var local = rec.wallInstallations.Find(x => x.instance == mod.instance);
-                    if (local == null) rec.wallInstallations.Add(mod); else { local.position = mod.position; local.rotation = mod.rotation; local.variants = mod.variants; local.state = mod.state; mod = local; }
-                }
+                var local = mod.instance != null ? rec.wallInstallations.Find(x => x.instance == mod.instance) : (it != null ? rec.wallInstallations.Find(x => x.item == it) : null);
+                if (local == null) rec.wallInstallations.Add(mod); else { local.position = mod.position; local.rotation = mod.rotation; local.variants = mod.variants; local.state = mod.state; local.item = it != null ? it : local.item; mod = local; }
             }
-            try { Known[mod] = Json(mod); } catch { }
+            try { Known[mod] = Json(mod); KnownId[mod] = id; } catch { }
             Plugin.Log.LogInfo("[inst] installation " + id + " applied (" + mod.windowGuid + ", state " + mod.state + ")");
             // past the "smash the wall" stage the plug is gone for good
             if (mod.instance != null && (int)mod.state >= 1)

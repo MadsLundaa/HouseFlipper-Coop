@@ -16,7 +16,7 @@ namespace HFCoop
         {
             _h = new Harmony(Plugin.Guid);
             ItemSync.Patch(_h);
-            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h);
+            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h);
             var save = AccessTools.Method(typeof(HouseSaveManager), "SaveRecordedGame");
             if (save != null) _h.Patch(save, prefix: new HarmonyMethod(typeof(Events), "BlockClientSave"));
             else Plugin.Log.LogWarning("[save] SaveRecordedGame not found - client saves are NOT blocked");
@@ -36,7 +36,7 @@ namespace HFCoop
             Watchdog.Phase("evt.item"); ItemSync.Tick(); InstSync.Tick(); MountSync.Tick(); LightSync.Tick(); Watchdog.Phase("evt.rec"); RecSync.Tick(); Watchdog.Phase("evt.money"); MoneySync.Tick(); ProgressSync.Tick(); FollowHost.Tick(); ClockSync.Tick(); DaySync.Tick(); JobSync.Tick(); CarrySync.Tick();
         }
 
-        public static void OnSessionStart() { MoneySync.OnSessionStart(); }
+        public static void OnSessionStart() { MoneySync.OnSessionStart(); if (Session.Role == Role.Host) ItemSync.AssignAnonymousIds(); }
 
         /// <summary>Clients never write the shared house to disk: only the host's save is authoritative.</summary>
         static bool BlockClientSave(object __1)

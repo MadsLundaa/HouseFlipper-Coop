@@ -16,6 +16,23 @@ namespace HFCoop
 
         public static void Reset() { Known.Clear(); _primed = false; }
 
+        /// <summary>
+        /// The game only lets a lamp shine while its room is "visible" to the player (SetVisibility from its culling): a lit office went dark as soon as a player stepped out of
+        /// it. A lamp that is switched on now stays lit whatever the player is looking at (config AlwaysLitLamps).
+        /// </summary>
+        public static void Patch(HarmonyLib.Harmony h)
+        {
+            try
+            {
+                var m = HarmonyLib.AccessTools.Method(typeof(Empyrean.HouseFlipper.Core.Interactions.LightsInteractableBase), "SetVisibility");
+                if (m == null) { Plugin.Log.LogWarning("[light] SetVisibility not found: lamps outside the player's room stay dark"); return; }
+                h.Patch(m, prefix: new HarmonyLib.HarmonyMethod(typeof(LightSync), "ForceVisible"));
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[light] could not patch lamp visibility: " + e.Message); }
+        }
+
+        static void ForceVisible(ref bool __0) { if (Cfg.AlwaysLitLamps.Value) __0 = true; }
+
         public static void Tick()
         {
             if (!Session.Active || !Snapshot.CanApplyState) return;

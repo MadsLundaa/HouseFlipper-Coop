@@ -117,6 +117,44 @@ namespace HFCoop
             catch (Exception e) { Plugin.Log.LogWarning("[perk] guard failed: " + e.Message); }
         }
 
+        /// <summary>
+        /// A skill levels up when its own statistic crosses a threshold: +1 perk point and the "new perk" popup, checked on every statistic change. On a client the host decides
+        /// the perk points (they are put back to the host's value), so a client whose statistics are a moment ahead (or whose points were reset) levelled up again on
+        /// every use of the tool and spammed the popup. A client never levels up by itself. Found by shape: the private parameterless method of SkillCategory that raises
+        /// numberOfPerksAvailable and calls AddMainPopupMessageToQueue.
+        /// </summary>
+        public static void PatchLevelUp(Harmony h)
+        {
+            try
+            {
+                var fld = typeof(SkillCategory).GetField("numberOfPerksAvailable");
+                if (fld == null) return;
+                byte[] tok = BitConverter.GetBytes(fld.MetadataToken); int n = 0;
+                foreach (var m in typeof(SkillCategory).GetMethods(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.DeclaredOnly))
+                {
+                    if (m.ReturnType != typeof(void) || m.GetParameters().Length != 0 || m.IsAbstract) continue;
+                    byte[] il; try { var b = m.GetMethodBody(); il = b == null ? null : b.GetILAsByteArray(); } catch { continue; }
+                    if (il == null) continue;
+                    bool sets = false, popup = false;
+                    for (int i = 0; i + 4 < il.Length; i++)
+                    {
+                        if (il[i] == 0x7D && il[i + 1] == tok[0] && il[i + 2] == tok[1] && il[i + 3] == tok[2] && il[i + 4] == tok[3]) sets = true;
+                        if (il[i] == 0x28 || il[i] == 0x6F)
+                        {
+                            try { var cm = m.Module.ResolveMethod(BitConverter.ToInt32(il, i + 1)); if (cm != null && cm.Name == "AddMainPopupMessageToQueue") popup = true; } catch { }
+                        }
+                    }
+                    if (!sets || !popup) continue;
+                    h.Patch(m, prefix: new HarmonyMethod(typeof(JobSync), "BlockLevelUp")); n++;
+                    Plugin.Log.LogInfo("[perk] clients no longer level up by themselves (" + m.Name + ")");
+                }
+                if (n == 0) Plugin.Log.LogWarning("[perk] level-up method not found - a client can still get repeated perk popups");
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[perk] level-up guard failed: " + e.Message); }
+        }
+
+        static bool BlockLevelUp() { return !(Session.Role == Role.Client && Session.Active); }
+
         static bool BlockPerk()
         {
             if (Session.Role != Role.Client || !Session.Active || Events.Applying) return true;

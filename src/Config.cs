@@ -1,4 +1,4 @@
-﻿using BepInEx.Configuration;
+using BepInEx.Configuration;
 
 namespace HFCoop
 {
@@ -8,7 +8,7 @@ namespace HFCoop
         public static ConfigEntry<bool> AutoReconnect;
         public static ConfigEntry<string> PlayerName, JoinAddress;
         public static ConfigEntry<bool> DevCommands, KeepSharedProgress;
-        public static ConfigEntry<bool> VerboseLog, ShowNameTags, AutoSyncMoney, SteamProbeAuto, SteamForceRelay, SteamHost;
+        public static ConfigEntry<bool> AlwaysLitLamps, DiscordPresence, VerboseLog, ShowNameTags, AutoSyncMoney, SteamProbeAuto, SteamForceRelay, SteamHost;
         public static ConfigEntry<string> SteamProbeTarget;
         public static ConfigEntry<int> SteamChunkKB;
         public static ConfigEntry<UnityEngine.KeyCode> MenuKey, HostKey, JoinKey, LeaveKey;
@@ -27,6 +27,8 @@ namespace HFCoop
             VerboseLog = c.Bind("Debug", "VerboseLog", false, "Log every replicated event.");
             KeepSharedProgress = c.Bind("Progress", "KeepSharedProgress", false, "Joiner: keep the shared skills/tools/statistics after leaving (default: restore your own).");
             DevCommands = c.Bind("Debug", "DevCommands", false, "Execute commands written to BepInEx/hfcoop-cmd-<pid>.txt (testing only).");
+            AlwaysLitLamps = c.Bind("UI", "AlwaysLitLamps", true, "Lamps that are switched on stay lit when you leave their room (the game normally darkens lamps outside the room you are in).");
+            DiscordPresence = c.Bind("UI", "DiscordPresence", true, "Show a Discord Rich Presence (game + co-op player count). The game's own native Discord SDK is always disabled: it can crash the game.");
             ShowNameTags =c.Bind("UI", "ShowNameTags", true, "Draw name tags above remote players.");
             SteamHost = c.Bind("Steam", "HostViaSteam", false, "When hosting, also accept Steam P2P connections (friends join by Steam ID or from the friends list, no port forwarding). TCP stays on regardless.");
             SteamChunkKB = c.Bind("Steam", "MaxChunkKB", 480, "Advanced: largest single Steam message in KB (frames above it are split and reassembled). Lower it only for testing.");

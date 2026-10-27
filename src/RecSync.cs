@@ -231,6 +231,34 @@ namespace HFCoop
             foreach (var w in walls) { try { if (w != null) m.Invoke(null, new object[] { w }); } catch (Exception e) { Plugin.Log.LogWarning("[rec] wall event failed: " + (e.InnerException ?? e).Message); } }
         }
 
+        /// <summary>
+        /// Walls another player built: the game's loader instantiates them but never adds them to the floor's wall list (WallsMapBuilder.wallsList), so paint/tiles applied
+        /// to them later find no wall ("tiles on newly built walls do not sync"). Announce each new wall like the wall tool does.
+        /// </summary>
+        static void RegisterBuiltWalls(IList mods)
+        {
+            try
+            {
+                Wall[] all = null; int n = 0; Empyrean.HouseFlipper.HouseManagement.WallsMapBuilder[] maps = null;
+                foreach (var o in mods)
+                {
+                    var mod = o as WallModification; if (mod == null) continue;
+                    if (mod.type != WallModification.Type.AddedWall && mod.type != WallModification.Type.AddedDoorWall) continue;
+                    if (all == null) { all = Resources.FindObjectsOfTypeAll<Wall>(); maps = Resources.FindObjectsOfTypeAll<Empyrean.HouseFlipper.HouseManagement.WallsMapBuilder>(); }
+                    var gc = mod.GetGridCoords();
+                    foreach (var w in all)
+                    {
+                        if (w == null || !w.gameObject.scene.IsValid() || !w.gameObject.activeInHierarchy || !object.Equals(w.GetGridCoords(), gc)) continue;
+                        bool known = false; foreach (var mb in maps) if (mb != null && mb.wallsList != null && mb.wallsList.Contains(w)) { known = true; break; }
+                        if (!known && GameEvents.RaiseWallAdded(w)) n++;
+                        break;
+                    }
+                }
+                if (n > 0) { Plugin.Log.LogInfo("[rec] registered " + n + " wall(s) built by another player"); RequestMeshRebuild(); }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[rec] registering built walls failed: " + (e.InnerException ?? e).Message); }
+        }
+
         static List<Wall> SmashRemoteWalls(IList mods)
         {
             var smashed = new List<Wall>();
@@ -286,7 +314,11 @@ namespace HFCoop
             {
                 var m = hsm.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (m == null) { Plugin.Log.LogWarning("[rec] apply method missing: " + name); continue; }
-                try { m.Invoke(hsm, new object[] { partial }); }
+                try
+                {
+                    if (m.IsGenericMethodDefinition) { m.MakeGenericMethod(t.Elem.GetGenericArguments()[0]).Invoke(hsm, new object[] { parsed }); continue; } // ApplyPiles<T>(List<PileModification<T>>)
+                    m.Invoke(hsm, new object[] { partial });
+                }
                 catch (Exception e) { Plugin.Log.LogError("[rec] " + name + " failed: " + (e.InnerException ?? e)); }
             }
             if (isWallField) ProgressSync.Rebase();
@@ -303,6 +335,7 @@ namespace HFCoop
                     foreach (var e in local) { if (JsonConvert.SerializeObject(e, Ser) == js) { have = true; break; } }
                     if (!have) local.Add(parsed[i]);
                 }
+            if (field == "modifiedWalls") RegisterBuiltWalls(parsed);
             if (smashedWalls != null && smashedWalls.Count > 0) RaiseWallDestroyed(smashedWalls); // after our recording lists the walls, the quest reads them
             return true;
         }

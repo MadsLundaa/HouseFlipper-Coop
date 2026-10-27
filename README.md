@@ -1,4 +1,4 @@
-# House Flipper Co-op (prototype 0.4.6)
+# House Flipper Co-op (prototype 0.4.9)
 
 A BepInEx plugin that lets several people renovate **the same house** in the **original House Flipper (2018, Steam)** at the same time.
 It is a prototype: the core loop (join, see each other, shared house state, shared money, host-owned save) is implemented and was tested with two real game instances; some systems are untested or not shared (see *Limitations* and `docs/test-checklist.md`).

@@ -9,7 +9,7 @@ namespace HFCoop
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "dev.hfcoop";
-        public const string Version = "0.4.6";
+        public const string Version = "0.4.9";
         internal static ManualLogSource Log;
         internal static string GameBuild = "";
 
@@ -61,7 +61,8 @@ namespace HFCoop
                 catch (System.IO.IOException e) { if (attempt >= 20) throw; Logger.LogWarning("config file busy (" + e.Message + "), retrying"); System.Threading.Thread.Sleep(300); }
             }
             _addr = Cfg.JoinAddress.Value;
-            Events.Init(); Watchdog.Start();
+            DiscordPresence.Patch(new HarmonyLib.Harmony(Guid + ".discord")); // before the game starts its own Discord SDK
+            Events.Init(); Watchdog.Start(); DiscordPresence.StartThread();
             Application.runInBackground = true; // a player who alt-tabs must not stall the session
             GameBuild = Application.version;
             Log.LogInfo("HFCoop " + Version + " loaded. Unity " + Application.unityVersion + ", game " + GameBuild);
@@ -86,7 +87,7 @@ namespace HFCoop
             Session.Tick();
             if (!Session.Active) Snapshot.Tick(); // clears the "do not save" flag after leaving a session and returning to the menu
             Watchdog.Phase("dev.tick");
-            Dev.Tick();
+            Dev.Tick(); DiscordPresence.Tick();
             Watchdog.Phase("update:end");
         }
 
@@ -96,7 +97,7 @@ namespace HFCoop
         }
 
         void OnDestroy() { if (Session.Active) Session.Leave("plugin unloaded"); }
-        void OnApplicationQuit() { if (Session.Active) Session.Leave("game closing"); }
+        void OnApplicationQuit() { if (Session.Active) Session.Leave("game closing"); DiscordPresence.Stop(); }
 
         void OnGUI()
         {
