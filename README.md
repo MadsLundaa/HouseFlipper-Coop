@@ -42,6 +42,7 @@ To uninstall, run `Uninstall.bat`. It removes only what the installer added. Sav
 - Always keep backups. The game was not designed for multiplayer.
 - If the host crashes, work since the host's last save is lost. Save before you finish.
 - Tested with game build 1.26252 on Windows, base game only. DLCs are not verified.
+- Steam Workshop addons are not supported or tested yet. Items from the Workshop may not show up or work for the other players.
 
 ## More information
 
