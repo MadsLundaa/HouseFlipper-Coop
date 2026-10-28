@@ -51,6 +51,8 @@ namespace HFCoop
         public static string NetIdPublic(Item it, bool create) { return NetId(it, create); }
         public static void RegisterCreated(string id, Item it) { CreatedById[id] = it; CreatedId[it] = id; }
         public static void QueuePublic(Item it) { Queue(it); }
+        /// <summary>The host loaded another house: what was pending or remembered belongs to the old one.</summary>
+        public static void OnHouseChanged() { Pending.Clear(); PendingDeleted.Clear(); LastJson.Clear(); Seen.Clear(); }
         /// <summary>Tell the other peers this item is gone (a sold door/window whose installation record disappeared).</summary>
         public static void AnnounceGone(string id) { if (Session.Active && !Events.Applying && !PendingDeleted.Contains(id)) PendingDeleted.Add(id); }
         public static string DevIds(string prefix) { var sb = new System.Text.StringBuilder(); foreach (var kv in CreatedById) if (kv.Key.StartsWith(prefix) && kv.Value != null) sb.AppendLine(kv.Key + " " + kv.Value.name); return sb.ToString(); }
@@ -104,6 +106,22 @@ namespace HFCoop
             if (it != null) { RecordSale(it, null); CreatedId.Remove(it); UnityEngine.Object.Destroy(it.gameObject); }
             CreatedById.Remove(id); LastJson.Remove(id);
         }
+        /// <summary>
+        /// Remove an item that is a duplicate of another one on this peer only: recorded as sold locally, forgotten and destroyed without telling the other peers (they run their
+        /// own check; what counts as a duplicate depends on what is in each peer's house).
+        /// </summary>
+        public static void DiscardLocal(Item it)
+        {
+            if (it == null) return;
+            string id; string guid = GuidOf(it);
+            if (CreatedId.TryGetValue(it, out id)) { CreatedId.Remove(it); CreatedById.Remove(id); LastJson.Remove(id); }
+            var keys = new List<string>(); foreach (var kv in Seen) if (kv.Value == it) keys.Add(kv.Key);
+            foreach (var k in keys) { Seen.Remove(k); LastJson.Remove(k); }
+            Pending.Remove(it);
+            RecordSale(it, string.IsNullOrEmpty(guid) ? null : guid);
+            UnityEngine.Object.Destroy(it.gameObject);
+        }
+
         public static Item ByNetId(string netId)
         {
             if (netId.StartsWith("s:")) return FromGuid(netId.Substring(2)) as Item;
@@ -135,7 +153,7 @@ namespace HFCoop
             if (rec.wallInstallations != null)
                 for (int i = 0; i < rec.wallInstallations.Count; i++)
                 {
-                    var wi = rec.wallInstallations[i]; var it = wi != null ? InstSync.ItemOf(wi) : null;
+                    var wi = rec.wallInstallations[i]; var it = wi != null ? InstSync.ItemOfLoaded(wi) : null;
                     if (it == null || CreatedId.ContainsKey(it) || !string.IsNullOrEmpty(GuidOf(it))) continue;
                     string id = "w:" + i; CreatedId[it] = id; CreatedById[id] = it;
                 }
@@ -152,7 +170,7 @@ namespace HFCoop
             if (rec.wallInstallations != null)
                 for (int i = 0; i < rec.wallInstallations.Count; i++)
                 {
-                    var it = rec.wallInstallations[i] != null ? InstSync.ItemOf(rec.wallInstallations[i]) : null; string id;
+                    var it = rec.wallInstallations[i] != null ? InstSync.ItemOfLoaded(rec.wallInstallations[i]) : null; string id;
                     if (it != null && CreatedId.TryGetValue(it, out id) && id.StartsWith("w:")) map["w" + i] = id;
                 }
             // the host's shared ids of items without a scene guid, with prefab and position: the client matches by nearest item, so items that settled a little differently still agree
@@ -198,7 +216,7 @@ namespace HFCoop
                 if (kv.Key.StartsWith("w"))
                 {
                     if (!int.TryParse(kv.Key.Substring(1), out i) || rec.wallInstallations == null || i >= rec.wallInstallations.Count) continue;
-                    var wit = InstSync.ItemOf(rec.wallInstallations[i]); if (wit == null) continue;
+                    var wit = InstSync.ItemOfLoaded(rec.wallInstallations[i]); if (wit == null) continue;
                     CreatedId[wit] = kv.Value; CreatedById[kv.Value] = wit; n++; continue;
                 }
                 if (!int.TryParse(kv.Key, out i) || i >= rec.modifiedItems.Count) continue;

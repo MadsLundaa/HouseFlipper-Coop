@@ -250,6 +250,20 @@ namespace HFCoop
                         Plugin.Log.LogInfo("[dev] puddles total " + i);
                         break;
                     }
+                case "insts": // every door/window installation: prefab, item, place, turn, scene guid (to see doubles)
+                    {
+                        var hs = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager;
+                        var rc = hs != null && hs.Recorder != null ? hs.Recorder.currentRecording : null; if (rc == null) { Plugin.Log.LogInfo("[dev] no recording"); break; }
+                        int k = 0;
+                        foreach (var e in rc.wallInstallations)
+                        {
+                            var it = InstSync.ItemOfLoaded(e);
+                            Plugin.Log.LogInfo("[dev] inst#" + (k++) + " " + e.windowGuid + " item=" + (it != null ? it.name : "null") + " pos=" + (it != null ? it.transform.position.ToString("F2") : e.position.ToString("F2")) + " yaw=" + (it != null ? it.transform.eulerAngles.y.ToString("F0") : "-") + " scene=" + e.sceneGuid + " inst=" + (e.instance != null));
+                        }
+                        foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                            if (it.gameObject.scene.IsValid() && it.gameObject.activeInHierarchy && it.IsDoor()) Plugin.Log.LogInfo("[dev] door " + it.name + " pos=" + it.transform.position.ToString("F2") + " yaw=" + it.transform.eulerAngles.y.ToString("F0") + " id=" + ItemSync.NetIdPublic(it, false));
+                        break;
+                    }
                 case "reclists": // sizes of the wall/installation Recording lists; "reclists <field>" also dumps that list
                     {
                         var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager;

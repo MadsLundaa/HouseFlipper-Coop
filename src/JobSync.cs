@@ -45,8 +45,11 @@ namespace HFCoop
 
         static void Post(ref int __result)
         {
-            if (Session.Role == Role.Client && Session.Active && _hostPct >= 0) __result = _hostPct;
+            if (Session.Role == Role.Client && Session.Active && _hostPct >= 0) { LocalPct = __result; __result = _hostPct; }
         }
+
+        /// <summary>What this peer's own quests count (the value the host's replaces on a client): shows whether the local quests follow the synced changes.</summary>
+        public static int LocalPct = -1;
 
         public static void Reset() { _qm = null; _hostPct = -1; _hostCan = -1; }
 
@@ -190,7 +193,7 @@ namespace HFCoop
             var parts = json.Split('|');
             int c; if (!int.TryParse(parts[0], out c)) return false;
             int can = parts.Length > 1 && parts[1] == "1" ? 1 : 0;
-            if (c != _hostPct) Plugin.Log.LogInfo("[job] host completion " + c + "%");
+            if (c != _hostPct) Plugin.Log.LogInfo("[job] host completion " + c + "% (own quests count " + LocalPct + "%)");
             bool changed = c != _hostPct || can != _hostCan;
             _hostPct = c; _hostCan = can; Find();
             if (changed) RefreshHud();

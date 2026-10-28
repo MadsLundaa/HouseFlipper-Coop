@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using Assets.Code.Player;
+using Code.GameManagers;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -229,6 +230,80 @@ namespace HFCoop
         {
             var pp = Progress(); if (pp == null) return;
             c.Send(new W(Msg.Event).S("prog").I(Session.MyId).S("full").S(DumpAll(pp).ToString(Formatting.None)).Done());
+            var office = OfficeNow(pp);
+            if (office != null) c.Send(new W(Msg.Event).S("prog").I(Session.MyId).S("office").S(office).Done());
+        }
+
+        // ---------- the office ----------
+        // Which house is "the office" (PlayerProgress.currentOfficeHouse) is not part of the dumped members: when the host claimed another house as the office the
+        // client kept its own office, so the host's office house still looked like a house on sale to the client. The host sends the office house (as the game saves it)
+        // and its creation time; the client swaps in the host's and puts its own back when the session ends.
+        static string _officeSent, _pendingOffice, _ownOffice;
+
+        static string OfficeNow(PlayerProgress pp)
+        {
+            if (pp == null || pp.currentOfficeHouse == null) return null;
+            try { return JsonConvert.SerializeObject(pp.currentOfficeHouse) + "\n" + pp.currentOfficeHouseCreatedDateTime.Ticks; }
+            catch (Exception e) { Plugin.Log.LogWarning("[prog] office not serialisable: " + e.Message); return null; }
+        }
+
+        static void ApplyOffice(PlayerProgress pp, string payload)
+        {
+            try
+            {
+                int nl = payload.LastIndexOf('\n'); if (nl < 0) return;
+                var info = JsonConvert.DeserializeObject<HouseInfo>(payload.Substring(0, nl));
+                long ticks; long.TryParse(payload.Substring(nl + 1), out ticks);
+                var expand = typeof(PlayerProgress).GetMethod("ExpandHouseInfo", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (expand != null) info = (HouseInfo)expand.Invoke(null, new object[] { info });
+                if (info == null) return;
+                pp.SetOfficeSafely(info);
+                pp.currentOfficeHouseCreatedDateTime = new DateTime(ticks);
+                Plugin.Log.LogInfo("[prog] office house is now the host's");
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[prog] could not apply the office: " + (e.InnerException ?? e).Message); }
+        }
+
+        /// <summary>The progression before a scene exists (joining from the main menu): through the game manager instead of the player object in the scene.</summary>
+        static PlayerProgress ProgressAny()
+        {
+            var pp = Progress(); if (pp != null) return pp;
+            foreach (var f in typeof(GameManager).GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (f.FieldType != typeof(GameManager)) continue;
+                var gm = f.GetValue(null) as GameManager;
+                if (gm != null && gm.player != null) return gm.player.progress;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Client: take over the host's office before the host's house is loaded. Whether a house is the office is read while it loads (the office PC is registered, the
+        /// "house for sale" visitors outside are not spawned); changing the office afterwards made the game put a second office PC into the player's hands.
+        /// </summary>
+        public static void ApplyOfficeNow()
+        {
+            if (Session.Role != Role.Client || _pendingOffice == null) return;
+            var pp = ProgressAny(); if (pp == null) return;
+            if (_ownOffice == null) _ownOffice = OfficeNow(pp);
+            var p = _pendingOffice; _pendingOffice = null;
+            if (p != OfficeNow(pp)) ApplyOffice(pp, p);
+        }
+
+        static void OfficeTick(PlayerProgress pp)
+        {
+            if (Session.Role == Role.Host)
+            {
+                var now = OfficeNow(pp); if (now == null || now == _officeSent) return;
+                bool first = _officeSent == null; _officeSent = now;
+                if (!first && Session.PlayerCount > 1) Events.Send("prog", "office", now);
+            }
+            else if (Session.Role == Role.Client && _pendingOffice != null && Snapshot.CanApplyState)
+            {
+                if (_ownOffice == null) _ownOffice = OfficeNow(pp);
+                var p = _pendingOffice; _pendingOffice = null;
+                if (p != OfficeNow(pp)) ApplyOffice(pp, p);
+            }
         }
 
         public static void OnSessionEnd()
@@ -236,6 +311,8 @@ namespace HFCoop
             var pp = Progress();
             if (pp != null && _ownBackup != null && !Cfg.KeepSharedProgress.Value) { RestoreFrom(pp, _ownBackup); Plugin.Log.LogInfo("[prog] restored own progression"); }
             _ownBackup = null;
+            if (pp != null && _ownOffice != null && !Cfg.KeepSharedProgress.Value) ApplyOffice(pp, _ownOffice);
+            _ownOffice = null; _pendingOffice = null; _officeSent = null;
             if (File.Exists(BackupPath)) File.Delete(BackupPath);
             Reset();
         }
@@ -268,6 +345,7 @@ namespace HFCoop
             _next = Time.realtimeSinceStartup + 1.0f;
             var pp = Progress(); if (pp == null) return;
             if (_pendingFull != null && Snapshot.CanApplyState) { ApplyFull(pp); return; }
+            OfficeTick(pp);
             if (Session.Role == Role.Client && !Snapshot.CanApplyState) return;
             if (!_primed) { Base.Clear(); foreach (var kv in DumpAll(pp).Properties()) Base[kv.Name] = kv.Value; _primed = true; return; }
             var cur = DumpAll(pp);
@@ -423,6 +501,7 @@ namespace HFCoop
                 _pendingFull = json; // applied as soon as the host's house is loaded (Tick)
                 return true;
             }
+            if (key == "office") { if (Session.Role != Role.Client) return false; _pendingOffice = json; return true; }
             var pp = Progress(); if (pp == null) return false;
             if (key == "ops")
             {

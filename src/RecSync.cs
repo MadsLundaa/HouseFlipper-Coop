@@ -53,6 +53,9 @@ namespace HFCoop
             new[] { "repairedCockpits", "ApplyRepairedCockpits" },
             new[] { "destroyableItemModifications", "ApplyDestroyableItems" },
             new[] { "changedWallModifications", "ApplyChangedWindows" },
+            // snowdrifts / rubbish heaps that were cleared, and replaced items (stairs, windows...)
+            new[] { "pileOfRubbishModifications", "ApplyPiles" },
+            new[] { "pileOfSnowModifications", "ApplyPiles" },
         };
 
         static void Build()
@@ -259,6 +262,36 @@ namespace HFCoop
             catch (Exception e) { Plugin.Log.LogWarning("[rec] registering built walls failed: " + (e.InnerException ?? e).Message); }
         }
 
+        /// <summary>A pile (snowdrift, rubbish heap) another player cleared: the pile loader only updates its look; the job quest counts through the game's "pile changed" event.</summary>
+        static void RaisePiles(IList mods)
+        {
+            try
+            {
+                foreach (var m in mods)
+                {
+                    var gm = m.GetType().GetMethod("GetGuid"); if (gm == null) continue;
+                    var pile = ItemSync.FromGuidPublic(gm.Invoke(m, null) as string) as Empyrean.HouseFlipper.Pile;
+                    if (pile != null) GameEvents.RaisePile(pile);
+                }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[rec] pile events failed: " + (e.InnerException ?? e).Message); }
+        }
+
+        /// <summary>An item (stairs, window...) another player replaced: tell the quests ("replacement confirmed") like the replace tool does.</summary>
+        static void RaiseReplaced(IList mods)
+        {
+            try
+            {
+                foreach (var m in mods)
+                {
+                    var rm = m as HF.Replaceable.ReplaceableModification; if (rm == null) continue;
+                    var rep = ItemSync.FromGuidPublic(rm.replaceableGuid) as HF.Replaceable.Replaceable;
+                    if (rep != null) GameEvents.RaiseReplaced(rep);
+                }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[rec] replacement events failed: " + (e.InnerException ?? e).Message); }
+        }
+
         static List<Wall> SmashRemoteWalls(IList mods)
         {
             var smashed = new List<Wall>();
@@ -323,7 +356,12 @@ namespace HFCoop
             }
             if (isWallField) ProgressSync.Rebase();
             if (field == "modifiedFloors" || field == "modifiedCeilings") RequestMeshRebuild(); // the floors are drawn by combined meshes: the loader only swaps the tile material
-            foreach (var kv in WallSidePatch.Touched) { try { if (kv.Key != null) kv.Key.FinalizePaintProcess(kv.Value); } catch (Exception e) { Plugin.Log.LogWarning("[rec] FinalizePaintProcess: " + e.Message); } }
+            foreach (var kv in WallSidePatch.Touched) { try { if (kv.Key != null) { kv.Key.FinalizePaintProcess(kv.Value); } } catch (Exception e) { Plugin.Log.LogWarning("[rec] FinalizePaintProcess: " + e.Message); } }
+            if (field == "modifiedWallSides" || field == "modifiedFloors" || field == "modifiedCeilings" || field == "modifiedStandaloneWallSides")
+            {
+                var sides = new List<Code.HouseBuildingBlocks.WallSide>(); foreach (var kv in WallSidePatch.Touched) if (kv.Key != null) sides.Add(kv.Key);
+                GameEvents.RaiseWallSidesChanged(sides);
+            }
             WallSidePatch.Touched = null;
             // keep our own recording (what the host saves) consistent
             var local = t.Fi.GetValue(rec) as IList;
@@ -336,6 +374,8 @@ namespace HFCoop
                     if (!have) local.Add(parsed[i]);
                 }
             if (field == "modifiedWalls") RegisterBuiltWalls(parsed);
+            if (field == "pileOfRubbishModifications" || field == "pileOfSnowModifications") RaisePiles(parsed);
+            if (field == "modifiedReplaceableItems") RaiseReplaced(parsed);
             if (smashedWalls != null && smashedWalls.Count > 0) RaiseWallDestroyed(smashedWalls); // after our recording lists the walls, the quest reads them
             return true;
         }

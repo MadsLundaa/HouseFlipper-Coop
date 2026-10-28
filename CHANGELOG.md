@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+* **The office is taken over before the host's house loads** (no second office PC in the client's hands, no "for sale" buyers outside). **The office the host claims is shared**: the host sends which house is its office (and when it was created) when you join and whenever it changes; the client swaps it in, so the host's office no longer looks like a house on sale, and puts its own office back when the session ends.
+* **Doors/windows left over from an earlier load are removed**: loading a house a second time in one run (host to the main menu and back, or a house change) left the first load's doors/windows standing next to the new ones. The check now also removes those leftovers (any door/window item of an installed kind that no record points to and that stands at the same spot as a recorded one); it runs a few times in the first minute after a load. Verified on the host with a reloaded house.
+* **Doubled doors and windows already in a save are removed**: after a house has loaded, every peer checks its own house for two doors or windows of the same kind at the same spot and removes the extra one locally (nothing is sent, so a peer that does not have the double is not affected).
+* **A quest that fails while a house loads no longer blocks the load** (the client got stuck on "Loading host's house"); the load retry now fires after 20 s instead of 90 s.
+* **Doubled doors/windows after a job and a client seeing office doors inside a job**: when the host changed house (job -> office and back) the mod compared the new house with what it had sent for the old one, so every door/window/record looked "new" (and every old one "gone") and was sent to a client that was still in the old house. The mod now resets what it remembers the moment the host changes house, tells the clients first ("changing"), ignores events about the old house on both sides, and the client reports "ready" once it is in the new house.
+* **Saves with duplicate records are cleaned** (when the host saves and when any save is loaded): duplicate door/window installation records, replaced-window records, item records and other doubles are merged, so doors/windows are not built twice when the office is loaded. A save that already has doubled windows is repaired when it is loaded.
+* **Re-applying an installation to a door/window that already has one** (frame and plug) no longer builds a second one next to it, and loaded installations always get an id both players share.
+* **Job progress now follows paint, tile and panel work done by the other player**: the painting/tiling quests recount on events that only the paint and tile tools raise, so work applied from the other player never updated them. The same events are now raised after a remote wall/floor/ceiling change (found from the quests' own subscriptions). Not verified in a job yet.
+* **Snowdrifts (and rubbish heaps) cleared by the other player** now disappear for you and count toward the job.
+* **Replaced items (stairs, windows...)**: the replacement quests are pointed at the replaced item and the game's "replacement confirmed" event is raised, so the job counts them (verified for stairs replaced by the host).
+
 ## About 0.4.7 and 0.4.8
 These two versions were internal builds and were never published: they did not feel finished enough to put in public, so the first public version after 0.4.6 is 0.4.9. Everything from 0.4.7 and 0.4.8 is included in 0.4.9 and listed below.
 

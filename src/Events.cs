@@ -16,7 +16,7 @@ namespace HFCoop
         {
             _h = new Harmony(Plugin.Guid);
             ItemSync.Patch(_h);
-            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h);
+            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h); RecordingGuard.Patch(_h); RecordingGuard.PatchQuests(_h);
             var save = AccessTools.Method(typeof(HouseSaveManager), "SaveRecordedGame");
             if (save != null) _h.Patch(save, prefix: new HarmonyMethod(typeof(Events), "BlockClientSave"));
             else Plugin.Log.LogWarning("[save] SaveRecordedGame not found - client saves are NOT blocked");
@@ -26,6 +26,7 @@ namespace HFCoop
 
         public static void Tick()
         {
+            FollowHost.Pre(); // before any tracker runs: a house change must not make them send the new house as "changes"
             Snapshot.Tick();
             if (Snapshot.Loading) return;
             if (Held.Count > 0)
@@ -70,6 +71,12 @@ namespace HFCoop
             if (Snapshot.Loading) { Held.Add(new KeyValuePair<Conn, byte[]>(from, raw)); return; } // replay once the house finished loading
             string kind = r.S(); int origin = r.I(); string key = r.S(); string json = r.S();
             if (Cfg.VerboseLog.Value) Plugin.Log.LogInfo("[evt] recv " + kind + " from #" + origin + " " + key);
+            // A house change is under way: events about the old house must not touch the new one (and the other way round). The host says "changing" at once, the snapshot
+            // follows a few seconds later; until then the client ignores events, and the host ignores a client's events until it reports "ready" in the new house.
+            if (Session.Role == Role.Client && kind == "house" && key == "changing") { Snapshot.SuspendEvents(); return; }
+            if (Session.Role == Role.Client && Snapshot.EventsSuspended && kind != "house") return;
+            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); return; }
+            if (Session.Role == Role.Host && kind != "house" && FollowHost.IsPending(origin)) return;
             bool ok = false;
             Applying = true;
             try

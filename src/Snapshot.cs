@@ -18,6 +18,10 @@ namespace HFCoop
     internal static class Snapshot
     {
         public static bool Loading;
+        static bool _suspended; static double _suspendAt;
+        /// <summary>Client: the host is changing house; events that arrive now describe the old house and are dropped until the new snapshot arrives.</summary>
+        public static bool EventsSuspended { get { return _suspended; } }
+        public static void SuspendEvents() { _suspended = true; _suspendAt = Session.Now; }
         /// <summary>True only while our own snapshot load runs; any other house change on a client is blocked (the host owns house changes).</summary>
         public static bool AllowLoad;
         /// <summary>Client: the host's house has been loaded (state that needs the house, e.g. money/progress, can be applied).</summary>
@@ -86,7 +90,7 @@ namespace HFCoop
 
         public static void Receive(R r)
         {
-            _awaiting = false;
+            _awaiting = false; _suspended = false;
             if (Loading)
             {
                 // the host changed house again while we are still loading: remember the newest one and apply it as soon as this load ends
@@ -108,6 +112,7 @@ namespace HFCoop
             ItemSync.Reset(); RecSync.Reset();
             if (Plugin.SceneName.Length == 0) LeaveMainMenu(); // joined from the main menu: do what "Continue Game" does before loading
             AllowLoad = true;
+            ProgressSync.ApplyOfficeNow(); // the office decides "is this the office" while the house loads (PC registration, buyers outside): it must be the host's by then
             try { h.LoadFromRecording(rec); } finally { AllowLoad = false; }
         }
 
@@ -137,7 +142,8 @@ namespace HFCoop
         public static void Tick()
         {
             if (_awaiting && _notReady && !Loading && Session.Role == Role.Client && Session.Now > _retryAt) Request();
-            if (!Session.Active) _awaiting = false;
+            if (!Session.Active) { _awaiting = false; _suspended = false; }
+            if (_suspended && Session.Now - _suspendAt > 60.0) _suspended = false; // the snapshot never came: do not stay deaf
             if (Tainted && !Loading && Plugin.SceneName.Length == 0) { Tainted = false; Plugin.Log.LogInfo("[snap] back in menu: saving allowed again"); }
             if (!Loading) return;
             var h = Hsm;
@@ -146,10 +152,10 @@ namespace HFCoop
             // fresh houses (orders) never raise isWaitingForApplyingSave: the right scene with a recorder also counts as loaded
             bool sceneUp = h != null && h.Recorder != null && h.Recorder.currentRecording != null && Plugin.SceneName.Length > 0 && Plugin.SceneName == _loadScene;
             bool done = h != null && !h.isWaitingForApplyingSave && ((_sawLoadStart && age > 3) || (sceneUp && age > 6) || age > 45);
-            if (!done && age > 90)
+            if (!done && age > 20)
             {
                 // never leave the player on "Loading host's house...": give up waiting, say why in the log, and fetch the house again
-                Plugin.Log.LogError("[snap] load did not finish after 90 s (waiting=" + (h != null && h.isWaitingForApplyingSave) + ", scene=" + Plugin.SceneName + ", expected=" + _loadScene + ", hsm=" + (h != null) + "): asking the host again");
+                Plugin.Log.LogError("[snap] load did not finish after 20 s (waiting=" + (h != null && h.isWaitingForApplyingSave) + ", scene=" + Plugin.SceneName + ", expected=" + _loadScene + ", hsm=" + (h != null) + "): asking the host again");
                 Loading = false; Events.Applying = false; Ready = false; Request();
                 return;
             }
@@ -159,6 +165,7 @@ namespace HFCoop
             RecSync.Prime(); InstSync.Prime(); ProgressSync.OnHouseReady();
             Session.Status = "Connected to " + Session.HostName;
             Plugin.Log.LogInfo("[snap] house loaded from host snapshot");
+            Events.Send("house", "ready", ""); // the host now accepts our events again
             if (_queuedSnapshot != null) { var q = _queuedSnapshot; _queuedSnapshot = null; var rr = new R(q); Plugin.Log.LogInfo("[snap] loading the newer snapshot"); Receive(rr); }
         }
     }
