@@ -1,6 +1,8 @@
-# House Flipper Co-op (prototype 0.5.2)
+# House Flipper Co-op: multiplayer mod for House Flipper (prototype 0.5.2)
 
-A BepInEx mod that lets several people renovate **the same house** together in the original **House Flipper (2018, Steam)**.
+**House Flipper multiplayer mod.** A BepInEx co-op mod that lets you and your friends renovate **the same house** together in the original **House Flipper (2018, Steam)**: host a game, friends join over the internet or Steam, and everyone cleans, paints, builds and flips together. It also supports Steam Workshop addons.
+
+Download the latest version from the [Releases page](https://github.com/MadsLundaa/HouseFlipper-Coop/releases/latest).
 
 It is a prototype: the core loop works and was tested with two real game instances, but some systems may be untested or not shared.
 
