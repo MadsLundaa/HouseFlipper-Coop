@@ -29,6 +29,39 @@ namespace HFCoop
         public static bool CanApplyState { get { return Session.Role != Role.Client || (Ready && !Loading); } }
         /// <summary>True from receiving the host house until the player returns to the menu: such a house must never be saved over the player's own save.</summary>
         public static bool Tainted;
+
+        // ---- after leaving a session the client goes back to the main menu ----
+        // The client was standing in the host's house (and the game must not save it): it picks its own save from the menu instead.
+        static bool _goMenu;
+        public static void RequestMainMenu() { if (Plugin.SceneName.Length > 0) _goMenu = true; }
+
+        static void GoToMainMenu()
+        {
+            try
+            {
+                var gmType = typeof(Code.GameManagers.GameManager); object gm = null;
+                foreach (var f in gmType.GetFields(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)) if (f.FieldType == gmType) { gm = f.GetValue(null); if (gm != null) break; }
+                var g = gm as Code.GameManagers.GameManager; var menu = g != null ? g.GetMainMenu() : null;
+                if (menu == null) { Plugin.Log.LogWarning("[snap] no main menu object: staying in the house"); return; }
+                // the pause menu's "Main menu" action: the private routine that ends in LoadStartScene (empties the hands, fades, loads the start scene)
+                System.Reflection.MethodInfo routine = null;
+                foreach (var m in typeof(MainMenu).GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly))
+                {
+                    if (m.Name == "LoadStartScene" || m.GetParameters().Length != 0 || m.ReturnType != typeof(void) || m.GetMethodBody() == null) continue;
+                    var il = m.GetMethodBody().GetILAsByteArray();
+                    for (int i = 0; i + 4 < il.Length && routine == null; i++)
+                    {
+                        if (il[i] != 0x28 && il[i] != 0x6F) continue;
+                        System.Reflection.MethodBase cb; try { cb = m.Module.ResolveMethod(BitConverter.ToInt32(il, i + 1)); } catch { continue; }
+                        if (cb != null && cb.Name == "LoadStartScene" && cb.DeclaringType == typeof(MainMenu)) routine = m;
+                    }
+                    if (routine != null) break;
+                }
+                Plugin.Log.LogInfo("[snap] session over: back to the main menu" + (routine == null ? " (direct)" : ""));
+                if (routine != null) routine.Invoke(menu, null); else menu.LoadStartScene();
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[snap] could not go back to the main menu: " + (e.InnerException ?? e).Message); }
+        }
         static double _loadStart; static bool _sawLoadStart;
         static string _mapJson, _loadScene;
         static byte[] _queuedSnapshot; // a newer snapshot that arrived while one was still loading (the host moved on again)
@@ -107,6 +140,14 @@ namespace HFCoop
             catch (Exception e) { Session.LastError = "Could not read host's house data: " + e.Message; Plugin.Log.LogError("[snap] " + e); return; }
             HouseInfoExpander.Expand(rec);
             var h = Hsm; if (h == null) { Session.LastError = "Game is not ready to load a house yet (still starting?). Try again."; Session.Leave(Session.LastError); return; }
+            var missing = Workshop.MissingIn(rec);
+            if (Workshop.Hold(missing, () => Begin(rec, h))) return; // Workshop items of that house are downloaded first
+            Begin(rec, h);
+        }
+
+        static void Begin(Recording rec, HouseSaveManager h)
+        {
+            _suspended = false;
             Ready = false; Events.Applying = true; Loading = true; Tainted = true; _sawLoadStart = false; _loadStart = Session.Now;
             Session.Status = "Loading host's house...";
             ItemSync.Reset(); RecSync.Reset();
@@ -143,6 +184,7 @@ namespace HFCoop
         {
             if (_awaiting && _notReady && !Loading && Session.Role == Role.Client && Session.Now > _retryAt) Request();
             if (!Session.Active) { _awaiting = false; _suspended = false; }
+            if (_goMenu && !Session.Active && !Loading) { _goMenu = false; GoToMainMenu(); }
             if (_suspended && Session.Now - _suspendAt > 60.0) _suspended = false; // the snapshot never came: do not stay deaf
             if (Tainted && !Loading && Plugin.SceneName.Length == 0) { Tainted = false; Plugin.Log.LogInfo("[snap] back in menu: saving allowed again"); }
             if (!Loading) return;
@@ -152,10 +194,10 @@ namespace HFCoop
             // fresh houses (orders) never raise isWaitingForApplyingSave: the right scene with a recorder also counts as loaded
             bool sceneUp = h != null && h.Recorder != null && h.Recorder.currentRecording != null && Plugin.SceneName.Length > 0 && Plugin.SceneName == _loadScene;
             bool done = h != null && !h.isWaitingForApplyingSave && ((_sawLoadStart && age > 3) || (sceneUp && age > 6) || age > 45);
-            if (!done && age > 20)
+            if (!done && age > Cfg.LoadRetrySeconds.Value && Watchdog.QuietFor(15)) // a slow PC that is still busy loading (main thread blocked) is given more time
             {
                 // never leave the player on "Loading host's house...": give up waiting, say why in the log, and fetch the house again
-                Plugin.Log.LogError("[snap] load did not finish after 20 s (waiting=" + (h != null && h.isWaitingForApplyingSave) + ", scene=" + Plugin.SceneName + ", expected=" + _loadScene + ", hsm=" + (h != null) + "): asking the host again");
+                Plugin.Log.LogError("[snap] load did not finish after " + Cfg.LoadRetrySeconds.Value + " s (waiting=" + (h != null && h.isWaitingForApplyingSave) + ", scene=" + Plugin.SceneName + ", expected=" + _loadScene + ", hsm=" + (h != null) + "): asking the host again");
                 Loading = false; Events.Applying = false; Ready = false; Request();
                 return;
             }

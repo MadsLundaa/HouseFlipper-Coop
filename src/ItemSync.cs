@@ -151,6 +151,19 @@ namespace HFCoop
             UnityEngine.Object.Destroy(it.gameObject);
         }
 
+        /// <summary>Test helper: place a Workshop item (by Steam id) two metres in front of the player, the way a bought item is created from a save.</summary>
+        public static string DevPlaceWorkshop(ulong id, float dx)
+        {
+            var pc = UnityEngine.Object.FindObjectOfType<Assets.Code.Player.PlayerController>(); if (pc == null) return "no player";
+            var p = pc.transform.position + pc.transform.forward * 2f + pc.transform.right * dx + Vector3.up * 0.3f;
+            var mod = new ItemModification { prefabGuid = "CustomItem_" + id, isWorkshopItem = true, position = p, rotation = Vector3.zero, currentItemState = new CurrentItemState() };
+            _mPostLoad.Invoke(mod, new object[] { Hsm });
+            if (mod.instance == null) return "could not create " + id;
+            var h = Hsm as HouseSaveManager; var rec = h.Recorder;
+            typeof(GameplayRecorder).GetMethod("OnBoughtOrModifiedItem", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(rec, new object[] { mod.instance });
+            return "placed " + mod.instance.name + " id=" + NetIdPublic(mod.instance, false);
+        }
+
         public static Item ByNetId(string netId)
         {
             if (netId.StartsWith("s:")) return FromGuid(netId.Substring(2)) as Item;
@@ -395,6 +408,8 @@ namespace HFCoop
         {
             var mod = JsonConvert.DeserializeObject<ItemModification>(json);
             if (mod == null) return false;
+            if (mod.isWorkshopItem && !mod.isDestroyed && Workshop.RejectOnHost(origin, netId, mod.prefabGuid)) return true; // the host lacks that addon
+            if (mod.isWorkshopItem && !mod.isDestroyed && Workshop.Defer(origin, netId, json, mod.prefabGuid)) return true; // a Workshop item this player does not have yet
             bool scene = netId.StartsWith("s:");
             Item inst = null;
             if (scene) { inst = FromGuid(netId.Substring(2)) as Item; mod.sceneGuid = netId.Substring(2); }

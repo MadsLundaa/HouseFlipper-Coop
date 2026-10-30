@@ -49,6 +49,18 @@ namespace HFCoop
                 .OrderBy(i => (i.transform.position - p).magnitude).ToArray();
         }
 
+        /// <summary>A dev command sent by the host over the session (test setups where the other PC cannot be reached): only runs where the dev flag file exists.</summary>
+        public static bool RunRemote(string cmd)
+        {
+            if (!File.Exists(Path.Combine(BepInEx.Paths.BepInExRootPath, "hfcoop-dev.enabled"))) return false; // only where the test flag file was created by hand
+            bool was = Events.Applying; Events.Applying = false; // the command acts like a local player (its changes are sent on)
+            try { Run(cmd.Trim()); } catch (Exception e) { Plugin.Log.LogError("[dev] remote '" + cmd + "' failed: " + e); }
+            finally { Events.Applying = was; }
+            return true;
+        }
+
+        static void Noop<T>(T x) { }
+
         static void Run(string line)
         {
             var a = line.Split(' ');
@@ -265,6 +277,49 @@ namespace HFCoop
                         break;
                     }
                 case "armrefresh": ProgressSync.DevArmRefresh(); Plugin.Log.LogInfo("[dev] post-claim refresh armed"); break;
+                case "wspawn": Plugin.Log.LogInfo("[dev] wspawn: " + ItemSync.DevPlaceWorkshop(ulong.Parse(a[1]), a.Length > 2 ? float.Parse(a[2]) : 0f)); break;
+                case "wsteam":
+                    {
+                        try
+                        {
+                            uint n = Steamworks.SteamUGC.GetNumSubscribedItems();
+                            Plugin.Log.LogInfo("[dev] wsteam: SteamUGC subscribed=" + n + " game array=" + (SteamWorkshop.instance != null && SteamWorkshop.instance.subscribedItemArray != null ? SteamWorkshop.instance.subscribedItemArray.Length.ToString() : "null") + " steamRunning=" + Steamworks.SteamAPI.IsSteamRunning());
+                            foreach (var s in new ulong[] { 2357510216, 2899555288, 2940415502, 3325898740, 3458480054, 3458481125, 3503495638, 3701522798, 3704675042, 3717187155 })
+                                Plugin.Log.LogInfo("[dev] wsteam " + s + " state=" + Steamworks.SteamUGC.GetItemState(new Steamworks.PublishedFileId_t(s)) + " itemSubscribed=" + (SteamWorkshop.instance != null && SteamWorkshop.instance.subscribedItemArray != null && SteamWorkshop.instance.ItemSubscribed(s)));
+                        }
+                        catch (Exception e) { Plugin.Log.LogInfo("[dev] wsteam failed: " + e.Message); }
+                        break;
+                    }
+                case "wclear": { int cn = 0; foreach (var w in Resources.FindObjectsOfTypeAll<Item>().Where(x => x.gameObject.scene.IsValid() && x.itemData != null && x.itemData.prefabGuid != null && x.itemData.prefabGuid.StartsWith("CustomItem_")).ToList()) { ItemSync.DiscardLocal(w); cn++; } Plugin.Log.LogInfo("[dev] wclear removed " + cn + " workshop item(s)"); break; }
+                case "wmove": // wmove <n> <dx> <dy> <dz>: move the nth Workshop item (sorted by prefab) like a player would, and record it
+                case "wsell": // wsell <n>: sell the nth Workshop item with the game's own seller tool
+                    {
+                        var ws = Resources.FindObjectsOfTypeAll<Item>().Where(x => x.gameObject.scene.IsValid() && x.gameObject.activeInHierarchy && x.itemData != null && x.itemData.prefabGuid != null && x.itemData.prefabGuid.StartsWith("CustomItem_")).OrderBy(x => x.itemData.prefabGuid).ToList();
+                        int wi = a.Length > 1 ? int.Parse(a[1]) : 0;
+                        if (wi >= ws.Count) { Plugin.Log.LogInfo("[dev] " + a[0] + ": no workshop item #" + wi + " (have " + ws.Count + ")"); break; }
+                        var wit = ws[wi];
+                        if (a[0] == "wmove")
+                        {
+                            wit.transform.position += new Vector3(float.Parse(a[2], System.Globalization.CultureInfo.InvariantCulture), float.Parse(a[3], System.Globalization.CultureInfo.InvariantCulture), float.Parse(a[4], System.Globalization.CultureInfo.InvariantCulture));
+                            var wrec = (typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager).Recorder;
+                            typeof(GameplayRecorder).GetMethod("OnBoughtOrModifiedItem", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(wrec, new object[] { wit });
+                            Plugin.Log.LogInfo("[dev] wmove " + wit.name + " -> " + wit.transform.position);
+                        }
+                        else
+                        {
+                            // the game's own sale (what the seller tool ends in): money, record, sold event, destroy
+                            var icm = UnityEngine.Object.FindObjectOfType<Assets.Code.Player.ItemsCoroutineManager>();
+                            var sm = typeof(Assets.Code.Player.ItemsCoroutineManager).GetMethod("SellSceneObject");
+                            if (icm == null || sm == null) { Plugin.Log.LogInfo("[dev] wsell: no items coroutine manager"); break; }
+                            var cbT = sm.GetParameters()[1].ParameterType; var cbArg = cbT.GetGenericArguments()[0];
+                            var cb = Delegate.CreateDelegate(cbT, typeof(Dev).GetMethod("Noop", BindingFlags.Static | BindingFlags.NonPublic).MakeGenericMethod(cbArg));
+                            Plugin.Log.LogInfo("[dev] wsell " + wit.name);
+                            sm.Invoke(icm, new object[] { wit, cb });
+                        }
+                        break;
+                    }
+                case "tell": Events.Send("devcmd", "", line.Substring(5)); break; // tell <command>: run a dev command on the other peers
+                case "wlist": foreach (var w in Resources.FindObjectsOfTypeAll<Item>()) if (w.gameObject.scene.IsValid() && w.gameObject.activeInHierarchy && w.itemData != null && w.itemData.prefabGuid != null && w.itemData.prefabGuid.StartsWith("CustomItem_")) Plugin.Log.LogInfo("[dev] workshop item " + w.itemData.prefabGuid + " " + w.name + " id=" + ItemSync.NetIdPublic(w, false) + " pos=" + w.transform.position.ToString("F2") + " path=" + Inspector.Path(w.transform) + " root=" + (w.transform.root == w.transform) + " comps=" + w.GetComponents<Item>().Length); break;
                 case "office": // office state of this peer: is the loaded house the office, the office PC, held items
                     {
                         var gmT = typeof(Code.GameManagers.GameManager); object gm = null;

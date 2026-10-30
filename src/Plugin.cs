@@ -9,7 +9,7 @@ namespace HFCoop
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "dev.hfcoop";
-        public const string Version = "0.5.1";
+        public const string Version = "0.5.2";
         internal static ManualLogSource Log;
         internal static string GameBuild = "";
 
@@ -82,7 +82,7 @@ namespace HFCoop
             if (Input.GetKeyDown(Cfg.HostKey.Value)) Session.StartHost();
             if (Input.GetKeyDown(Cfg.JoinKey.Value)) Session.StartJoin(Cfg.JoinAddress.Value);
             if (Input.GetKeyDown(Cfg.LeaveKey.Value)) Session.Leave();
-            if (!_recovered && Time.realtimeSinceStartup > 5f) _recovered = MoneySync.RecoverIfNeeded() & ProgressSync.RecoverIfNeeded();
+            if (!_recovered && Time.realtimeSinceStartup > 5f) _recovered = MoneySync.RecoverIfNeeded() & ProgressSync.RecoverIfNeeded() & Workshop.RecoverIfNeeded();
             Watchdog.Phase("session.tick");
             Session.Tick();
             if (!Session.Active) Snapshot.Tick(); // clears the "do not save" flag after leaving a session and returning to the menu

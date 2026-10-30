@@ -144,6 +144,7 @@ namespace HFCoop
         public static void Leave(string reason = "Disconnected")
         {
             _rc = null; // leaving on purpose (or the session ended for good): no reconnect
+            bool wasClient = Role == Role.Client;
             try
             {
                 if (Role == Role.Client && _hostConn != null) { _hostConn.Send(new W(Msg.Bye).Done()); Thread.Sleep(50); _hostConn.Close("left"); }
@@ -159,6 +160,7 @@ namespace HFCoop
             Role = Role.None; MyId = -1; Status = reason;
             Plugin.Log.LogInfo("[net] session ended: " + reason);
             Events.OnSessionEnd();
+            if (wasClient && Snapshot.Tainted) Snapshot.RequestMainMenu(); // back to the menu: the client picks its own save
         }
 
         static void Fail(string msg) { LastError = msg; Status = "Error"; Plugin.Log.LogWarning("[net] " + msg); }

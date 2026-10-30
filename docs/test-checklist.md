@@ -290,6 +290,9 @@ Verified with two instances: the host and client agree on all 166 shared ids of 
 User-verified 2026-10-27: a door built during the session syncs opening, closing and selling; perk popups no longer repeat on the client; the office PC syncs; tiles and paint on newly built walls sync. Windows built during the session were tried separately and work as well.
 User-verified 2026-10-27: a window built during the session also syncs opening, closing and selling.
 
+## 0.5.2 (2026-10-30)
+Workshop addons (second PC on another Steam account: download, late items, unsubscribe, moving, selling, refused items), open doors for joining clients, main menu after leaving: verified with two PCs.
+
 ## 0.5.1 (2026-10-30)
 Office move to the client, doors after a host reload and quicker leftover-door cleanup: verified with two instances and by playtesting (office move, doors, front door).
 

@@ -31,7 +31,7 @@ namespace HFCoop
             Plugin.Log.LogInfo("[follow] host loaded a different house");
             // the trackers compare the current state with what they sent before: against the new house everything would look new (and everything old gone) and be sent to
             // clients that are still in the old house (office doors appearing inside a job, doors doubled, items "sold")
-            RecSync.Prime(); InstSync.Reset(); InstSync.Prime(); LightSync.Reset(); ItemSync.OnHouseChanged();
+            RecSync.Prime(); InstSync.Reset(); InstSync.Prime(); LightSync.Reset(); ItemSync.OnHouseChanged(); Interactions.ResetToggles();
             _pending.Clear(); foreach (var id in new List<int>(Session.Players.Keys)) _pending.Add(id); _pendingUntil = Session.Now + 120.0;
             if (Session.PlayerCount > 1) Events.Send("house", "changing", "");
         }

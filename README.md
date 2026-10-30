@@ -1,4 +1,4 @@
-# House Flipper Co-op (prototype 0.5.1)
+# House Flipper Co-op (prototype 0.5.2)
 
 A BepInEx mod that lets several people renovate **the same house** together in the original **House Flipper (2018, Steam)**.
 
@@ -42,7 +42,7 @@ To uninstall, run `Uninstall.bat`. It removes only what the installer added. Sav
 - Always keep backups. The game was not designed for multiplayer.
 - If the host crashes, work since the host's last save is lost. Save before you finish.
 - Tested with game build 1.26252 on Windows, base game only. DLCs are not verified.
-- Steam Workshop addons are not supported or tested yet. Items from the Workshop may not show up or work for the other players.
+- Steam Workshop addons are supported. When the host uses Workshop items you do not have, the mod subscribes you to them for the session (Steam downloads them before the house loads) and unsubscribes again when you disconnect; addons you already had are never touched. If you place an item from an addon the host does not have, the host refuses it and it is sold back. Tested with furniture and prop addons; addons with their own behaviour are untested. Turn the temporary downloads off with `TemporaryDownloads = false` under `[Workshop]` in `BepInEx\config\dev.hfcoop.cfg`.
 - The player limit is 4, including the host. You can raise it with `MaxPlayers` in `BepInEx\config\dev.hfcoop.cfg`, but there is no promise that anything above 4 players works as intended.
 
 ## More information

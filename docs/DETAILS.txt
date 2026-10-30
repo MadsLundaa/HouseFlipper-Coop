@@ -94,7 +94,7 @@ Other options: port, name, send rate, timeouts, max players, verbose logging. Lo
 ## Compatibility
 
 * Tested with game build **1.26252 (ab1aa)**, Unity 2019.4.39, Windows 11, base game, house *SmallFirstHouse*: two instances on one PC, and (0.3.0) two physical machines on one LAN (see `docs/test-checklist.md`).
-* DLCs and Steam Workshop items: **not verified**. Workshop items need all players to subscribe to the same items.
+* DLCs: **not verified**. Steam Workshop items: a joiner temporarily subscribes to (and downloads) the Workshop items of the host's house that it lacks and unsubscribes again on leaving (config `Workshop / TemporaryDownloads`); an item from an addon the host does not have is refused by the host and sold back. Tested with prop/furniture addons only.
 * Single-player is unaffected when no session is active (the plugin only hooks the game's save-recording events).
 
 ## Build from source

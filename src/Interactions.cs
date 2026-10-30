@@ -110,8 +110,38 @@ namespace HFCoop
             return false;
         }
 
+        // ---- doors and windows that are open when a player joins ----
+        // A "use" is a toggle, and the open/closed state of a door is not part of the house save, so a client that joins loads every door closed. The host then closed
+        // its open door (a toggle) and it opened on the client. The host therefore counts the uses of every two-state object since the house was loaded (also before
+        // a session starts, and including the uses applied from clients) and replays the odd ones to a client when it reports that its house is loaded.
+        static readonly Dictionary<Interactable, int> Toggles = new Dictionary<Interactable, int>();
+        static readonly HashSet<string> NotTwoState = new HashSet<string> { "DoorBellInteraction", "TrashbinAnimationController", "InteractableAnimationCycler", "HFLightSwitch", "InteractableWithAnimationClip" };
+
+        public static void ResetToggles() { Toggles.Clear(); }
+
+        static bool TwoState(Interactable i)
+        {
+            if (!Replicated(i)) return false;
+            for (var t = i.GetType(); t != null; t = t.BaseType) if (NotTwoState.Contains(t.Name)) return false;
+            return true;
+        }
+
+        public static void SendStatesTo(Conn c)
+        {
+            if (Session.Role != Role.Host) return;
+            int n = 0;
+            foreach (var kv in new List<KeyValuePair<Interactable, int>>(Toggles))
+            {
+                var i = kv.Key; if (i == null || kv.Value % 2 == 0) continue;
+                string key = KeyOf(i); if (key == null) continue;
+                c.Send(new W(Msg.Event).S("use").I(Session.MyId).S(key).S("").Done()); n++;
+            }
+            if (n > 0) Plugin.Log.LogInfo("[use] sent " + n + " open door(s)/window(s)/lid(s) to the player who just joined");
+        }
+
         static void Used(Interactable __instance, bool smart)
         {
+            if (__instance != null && TwoState(__instance)) { int tn; Toggles.TryGetValue(__instance, out tn); Toggles[__instance] = tn + 1; }
             if (!Session.Active || Events.Applying || __instance == null) return;
             if (!Replicated(__instance))
             {
