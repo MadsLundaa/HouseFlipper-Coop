@@ -290,13 +290,41 @@ namespace HFCoop
             if (p != OfficeNow(pp)) ApplyOffice(pp, p);
         }
 
+        // A house the host just made its office: the host puts the office PC down, and the client's copy of the house was loaded before that (not an office, no PC), so it kept
+        // looking like a house for sale. Once the host has put the PC down the clients fetch the house again, now with the office already switched.
+        static bool _refreshArmed, _heldSeen; static double _refreshAt, _freeSince, _pcPlacedAt;
+        public static bool RefreshArmed { get { return _refreshArmed; } }
+        static double _pcSentAt;
+        /// <summary>The office PC was sent to the clients. Claiming the office happens when the PC is put down, so this usually comes just BEFORE the office change is noticed.</summary>
+        public static void OfficePcPlaced() { _pcSentAt = Time.realtimeSinceStartup; if (_refreshArmed && _pcPlacedAt == 0) _pcPlacedAt = _pcSentAt; }
+
+        public static void DevArmRefresh() { _refreshArmed = true; _refreshAt = Time.realtimeSinceStartup; _heldSeen = true; _freeSince = 0; }
+
+        static void RefreshAfterClaim()
+        {
+            if (!_refreshArmed) return;
+            double t = Time.realtimeSinceStartup;
+            if (Session.PlayerCount < 2 || t - _refreshAt > 600) { _refreshArmed = false; return; }
+            if (_pcPlacedAt > 0) { if (t - _pcPlacedAt < 4) return; _heldSeen = true; _freeSince = t - 4; } // the office PC was sent to the clients: it is down
+            else if (CarrySync.HeldNow() != null) { _heldSeen = true; _freeSince = 0; return; }
+            if (!_heldSeen) return;
+            if (_freeSince == 0) { _freeSince = t; return; }
+            if (t - _freeSince < 4) return;
+            _refreshArmed = false;
+            Plugin.Log.LogInfo("[prog] office claimed and the PC is down: clients load the house again");
+            ItemSync.AssignAnonymousIds();
+            Events.Send("house", "changing", "");
+            Events.Send("house", Plugin.SceneName, "");
+        }
+
         static void OfficeTick(PlayerProgress pp)
         {
             if (Session.Role == Role.Host)
             {
+                RefreshAfterClaim();
                 var now = OfficeNow(pp); if (now == null || now == _officeSent) return;
                 bool first = _officeSent == null; _officeSent = now;
-                if (!first && Session.PlayerCount > 1) Events.Send("prog", "office", now);
+                if (!first && Session.PlayerCount > 1) { Events.Send("prog", "office", now); _refreshArmed = true; _refreshAt = Time.realtimeSinceStartup; _heldSeen = false; _freeSince = 0; _pcPlacedAt = Time.realtimeSinceStartup - _pcSentAt < 30 ? _pcSentAt : 0; }
             }
             else if (Session.Role == Role.Client && _pendingOffice != null && Snapshot.CanApplyState)
             {

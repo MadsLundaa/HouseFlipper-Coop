@@ -35,7 +35,10 @@ namespace HFCoop
         {
             var h = Hsm; if (h == null) return null;
             var m = h.GetType().GetMethod("ComponentToGuid");
-            return m == null ? null : m.Invoke(h, new object[] { c }) as string;
+            string g = m == null ? null : m.Invoke(h, new object[] { c }) as string;
+            // after a second load of the house the guid table can miss an object that still knows its own scene guid (the item loader stores it on the item)
+            if (string.IsNullOrEmpty(g) && c is Item) { var sg = ((Item)c).sceneGuid; if (!string.IsNullOrEmpty(sg) && FromGuid(sg) == c) g = sg; }
+            return g;
         }
 
         static Component FromGuid(string g)
@@ -69,7 +72,33 @@ namespace HFCoop
         /// id: their moves created duplicates on the other peer and their doors/windows/cupboards could not be addressed. Both peers load the same house, so a name built
         /// from the prefab and the position is the same on both ("n:prefab:x:y:z"); it is assigned right after loading (client) / when the session starts or the house changes (host).
         /// </summary>
+        static double _assignUntil, _assignNext, _settleAt;
+
+        /// <summary>The loaded house has been still for a few seconds: scene guids are registered and the delayed doors/windows exist. Ids made earlier would be wrong (a scene item without its guid yet got a position id).</summary>
+        public static bool Settled()
+        {
+            var h = Hsm as HouseSaveManager; double t = Time.realtimeSinceStartup;
+            if (Snapshot.Loading || h == null || h.isWaitingForApplyingSave) { _settleAt = t + 6.0; return false; }
+            return t >= _settleAt;
+        }
+        static string PositionId(Item it)
+        {
+            string pg = it.itemData != null && it.itemData.prefabGuid != null ? it.itemData.prefabGuid : "none";
+            var p = it.transform.position;
+            string baseId = "n:" + pg.Substring(0, Math.Min(8, pg.Length)) + ":" + Mathf.Round(p.x * 20f) + ":" + Mathf.Round(p.y * 20f) + ":" + Mathf.Round(p.z * 20f);
+            string id = baseId; Item other;
+            for (int k = 1; CreatedById.TryGetValue(id, out other) && other != null && other != it; k++) id = baseId + "#" + k;
+            return id;
+        }
+
         public static int AssignAnonymousIds()
+        {
+            // doors/windows and other items of a freshly loaded house appear some seconds after the load; keep looking for a while so they get the shared id before anyone uses them
+            _assignUntil = Time.realtimeSinceStartup + 90f; _assignNext = Time.realtimeSinceStartup + 3f;
+            return AssignAnonymousIdsNow();
+        }
+
+        static int AssignAnonymousIdsNow()
         {
             int n = 0;
             try
@@ -125,7 +154,27 @@ namespace HFCoop
         public static Item ByNetId(string netId)
         {
             if (netId.StartsWith("s:")) return FromGuid(netId.Substring(2)) as Item;
-            Item i; CreatedById.TryGetValue(netId, out i); return i;
+            Item i; CreatedById.TryGetValue(netId, out i);
+            if (i == null && netId.StartsWith("n:")) i = ByPosition(netId);
+            return i;
+        }
+
+        /// <summary>A position id ("n:prefab:x:y:z") this peer did not hand out itself (it knows that item under another id): find the item by what the id is made of.</summary>
+        static Item ByPosition(string netId)
+        {
+            try
+            {
+                var p = netId.Split('#')[0].Split(':'); if (p.Length < 5) return null;
+                float x = float.Parse(p[2]), y = float.Parse(p[3]), z = float.Parse(p[4]);
+                foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                {
+                    if (it == null || !it.gameObject.scene.IsValid() || !it.gameObject.activeInHierarchy || it.itemData == null || string.IsNullOrEmpty(it.itemData.prefabGuid) || !it.itemData.prefabGuid.StartsWith(p[1])) continue;
+                    var q = it.transform.position;
+                    if (Mathf.Round(q.x * 20f) == x && Mathf.Round(q.y * 20f) == y && Mathf.Round(q.z * 20f) == z) return it;
+                }
+            }
+            catch { }
+            return null;
         }
 
         static string NetId(Item it, bool create)
@@ -135,6 +184,13 @@ namespace HFCoop
             string g = GuidOf(it);
             if (!string.IsNullOrEmpty(g)) return "s:" + g;
             if (!create) return null;
+            if (Session.Active && !Settled())
+            {
+                // still loading / just loaded: this is an item that came with the house, not one a player made. Both peers load the same house, so name it by what it is and where it stands
+                id = PositionId(it);
+                CreatedId[it] = id; CreatedById[id] = it;
+                return id;
+            }
             id = "c:" + Session.MyId + ":" + (++_counter);
             CreatedId[it] = id; CreatedById[id] = it;
             return id;
@@ -304,6 +360,8 @@ namespace HFCoop
         {
             if (!Session.Active) { Pending.Clear(); PendingDeleted.Clear(); return; }
             ScanDestroyed();
+            bool settled = Settled();
+            if (settled && Time.realtimeSinceStartup < _assignUntil && Time.realtimeSinceStartup > _assignNext) { _assignNext = Time.realtimeSinceStartup + 3f; AssignAnonymousIdsNow(); }
             foreach (var id in PendingDeleted)
             {
                 LastJson.Remove(id);
@@ -326,6 +384,7 @@ namespace HFCoop
                     LastJson[id] = json;
                     if (id.StartsWith("s:")) Seen[id] = it;
                     Events.Send("item", id, json);
+                    if (it.GetComponentInChildren<Assets.Code.UI.Computer.LaptopController>(true) != null) ProgressSync.OfficePcPlaced();
                 }
                 catch (Exception e) { Plugin.Log.LogError("[item] send failed: " + e); }
             }

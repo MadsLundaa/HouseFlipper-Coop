@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+* **Moving the office now reaches the client**: when the host makes a house its office and puts the office PC down, the clients load the house again with the office already switched, so it no longer looks like a house for sale to them (no for-sale appraisers) and no second office PC ends up in their hands.
+* **Doors that come with a house work after the host reloads it** (main menu and back, or a house change): they get an id both players compute from the door's prefab and place instead of a host-made one the client could not find, ids are only given once the house has settled, and an unknown position id is looked up by position. This also fixes the front door not opening for the client after a reload.
+* **Leftover doors/windows from an earlier load are removed sooner** (2 s after a load, repeated every 4 s), so the short-lived double is much less visible.
+
 ## 0.5.0
 * **The office is taken over before the host's house loads** (no second office PC in the client's hands, no "for sale" buyers outside). **The office the host claims is shared**: the host sends which house is its office (and when it was created) when you join and whenever it changes; the client swaps it in, so the host's office no longer looks like a house on sale, and puts its own office back when the session ends.
 * **Doors/windows left over from an earlier load are removed**: loading a house a second time in one run (host to the main menu and back, or a house change) left the first load's doors/windows standing next to the new ones. The check now also removes those leftovers (any door/window item of an installed kind that no record points to and that stands at the same spot as a recorded one); it runs a few times in the first minute after a load. Verified on the host with a reloaded house.

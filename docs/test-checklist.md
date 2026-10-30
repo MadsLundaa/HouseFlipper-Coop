@@ -290,5 +290,8 @@ Verified with two instances: the host and client agree on all 166 shared ids of 
 User-verified 2026-10-27: a door built during the session syncs opening, closing and selling; perk popups no longer repeat on the client; the office PC syncs; tiles and paint on newly built walls sync. Windows built during the session were tried separately and work as well.
 User-verified 2026-10-27: a window built during the session also syncs opening, closing and selling.
 
+## 0.5.1 (2026-10-30)
+Office move to the client, doors after a host reload and quicker leftover-door cleanup: verified with two instances and by playtesting (office move, doors, front door).
+
 ## 0.5.0 (2026-10-28)
 Verified with two instances: the host changing house sends `changing`, the client follows and reports `ready`, no event flood. NOT verified (need a job / the friend's save): doubled doors after a job, office doors inside a job, snowdrift removal and its progress, stairs replacement, tiling progress, multi-colour painting progress, the duplicate-record cleaner on a real corrupted save.

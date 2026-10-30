@@ -9,7 +9,7 @@ namespace HFCoop
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "dev.hfcoop";
-        public const string Version = "0.5.0";
+        public const string Version = "0.5.1";
         internal static ManualLogSource Log;
         internal static string GameBuild = "";
 

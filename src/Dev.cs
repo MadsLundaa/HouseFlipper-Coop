@@ -264,6 +264,20 @@ namespace HFCoop
                             if (it.gameObject.scene.IsValid() && it.gameObject.activeInHierarchy && it.IsDoor()) Plugin.Log.LogInfo("[dev] door " + it.name + " pos=" + it.transform.position.ToString("F2") + " yaw=" + it.transform.eulerAngles.y.ToString("F0") + " id=" + ItemSync.NetIdPublic(it, false));
                         break;
                     }
+                case "armrefresh": ProgressSync.DevArmRefresh(); Plugin.Log.LogInfo("[dev] post-claim refresh armed"); break;
+                case "office": // office state of this peer: is the loaded house the office, the office PC, held items
+                    {
+                        var gmT = typeof(Code.GameManagers.GameManager); object gm = null;
+                        foreach (var f in gmT.GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)) if (f.FieldType == gmT) { gm = f.GetValue(null); if (gm != null) break; }
+                        var g = gm as Code.GameManagers.GameManager; if (g == null) { Plugin.Log.LogInfo("[dev] no game manager"); break; }
+                        var pr = g.player.progress; var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager;
+                        var cr = hsm != null && hsm.Recorder != null ? hsm.Recorder.currentRecording : null;
+                        Plugin.Log.LogInfo("[dev] office: IsAtOffice=" + g.IsAtOffice() + " progress.office=" + (pr.currentOfficeHouse != null ? pr.currentOfficeHouse.ToString() : "null") + " progressCreated=" + pr.currentOfficeHouseCreatedDateTime.Ticks + " recordingCreated=" + (cr != null ? cr.createdDateTime.Ticks.ToString() : "-") + " recHouse=" + (cr != null && cr.houseInfo != null ? cr.houseInfo.ToString() : "-"));
+                        foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                            if (it.gameObject.scene.IsValid() && it.gameObject.activeInHierarchy && (it.name.IndexOf("comput", StringComparison.OrdinalIgnoreCase) >= 0 || it.name.IndexOf("laptop", StringComparison.OrdinalIgnoreCase) >= 0 || it.name.IndexOf("office", StringComparison.OrdinalIgnoreCase) >= 0))
+                                Plugin.Log.LogInfo("[dev] office item " + it.name + " pos=" + it.transform.position.ToString("F2") + " id=" + ItemSync.NetIdPublic(it, false) + " parent=" + (it.transform.parent != null ? it.transform.parent.name : "-"));
+                        break;
+                    }
                 case "reclists": // sizes of the wall/installation Recording lists; "reclists <field>" also dumps that list
                     {
                         var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager;

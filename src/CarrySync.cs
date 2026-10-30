@@ -21,6 +21,9 @@ namespace HFCoop
 
         public static void Reset() { _tool = null; _lastId = null; Targets.Clear(); }
 
+        /// <summary>The item this player is carrying right now (null when none).</summary>
+        public static Item HeldNow() { return Held(); }
+
         static Item Held()
         {
             if (_tool == null)

@@ -53,7 +53,7 @@ namespace HFCoop
         // A save can contain the same door or window twice (two installation records for one place, or a scene door plus a copy). The records are cleaned when the save is
         // applied, but a pair that survived still stands in the house as two objects. Every peer looks for such pairs in its own house after it loaded and removes the extra one
         // locally: the other peers may not have the same doubles, so nothing is sent.
-        static double _dupAt; static int _dupRuns;
+        static double _dupAt, _primedAt; static int _dupRuns;
 
         /// <summary>The door/window Item of a wall installation object (its Item-typed property, else the item it sits under).</summary>
         static Item ItemOfInstallation(Empyrean.HouseFlipper.WallModifiers.WallInstallation wi)
@@ -126,7 +126,7 @@ namespace HFCoop
             var rec = Cur(); if (rec == null || rec.wallInstallations == null) return;
             Known.Clear();
             foreach (var e in rec.wallInstallations) { try { Known[e] = Json(e); var pit = ItemOfLoaded(e); string pid = pit != null ? ItemSync.NetIdPublic(pit, false) : null; if (pid != null) KnownId[e] = pid; } catch { } }
-            _primed = true; _dupAt = Time.realtimeSinceStartup + 8f; _dupRuns = 0;
+            _primed = true; _primedAt = Time.realtimeSinceStartup; _dupAt = Time.realtimeSinceStartup + 2f; _dupRuns = 0;
         }
 
         public static void Tick()
@@ -135,10 +135,10 @@ namespace HFCoop
             _next = Time.realtimeSinceStartup + 0.5f;
             var rec = Cur(); if (rec == null || rec.wallInstallations == null) return;
             if (!_primed) { Prime(); return; }
-            if (_dupRuns < 6 && Time.realtimeSinceStartup > _dupAt)
+            if (_dupRuns < 12 && Time.realtimeSinceStartup > _dupAt)
             {
                 var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager;
-                if (hsm != null && !hsm.isWaitingForApplyingSave && !Snapshot.Loading) { _dupRuns++; _dupAt = Time.realtimeSinceStartup + 10f; DedupeLive(rec); }
+                if (hsm != null && !hsm.isWaitingForApplyingSave && !Snapshot.Loading) { _dupRuns++; _dupAt = Time.realtimeSinceStartup + 4f; DedupeLive(rec); }
             }
             foreach (var e in new List<InstallationsModification>(rec.wallInstallations))
             {
@@ -146,6 +146,8 @@ namespace HFCoop
                 string old; if (Known.TryGetValue(e, out old) && old == js) continue;
                 var item = ItemOf(e);
                 if (item == null) { if (_warned.Add(e)) Plugin.Log.LogWarning("[inst] installation without item yet: instance=" + (e.instance != null) + " guid=" + e.windowGuid); continue; } // retried on the next poll
+                // a door that came with the house gets the id both peers compute from its place; "c:" ids are for things made during the session (the other peer cannot find those)
+                if (Time.realtimeSinceStartup < _primedAt + 90f && ItemSync.NetIdPublic(item, false) == null) { if (!ItemSync.Settled()) continue; ItemSync.AssignAnonymousIds(); }
                 string id = ItemSync.NetIdPublic(item, true); if (id == null) { if (_warned.Add(e)) Plugin.Log.LogWarning("[inst] no net id for " + item.name); continue; }
                 Known[e] = js; KnownId[e] = id;
                 ItemSync.QueuePublic(item); // the door must exist on the other peer before its installation arrives
