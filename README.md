@@ -1,4 +1,4 @@
-# House Flipper Co-op (prototype 0.4.9)
+# House Flipper Co-op (prototype 0.5.1)
 
 A BepInEx mod that lets several people renovate **the same house** together in the original **House Flipper (2018, Steam)**.
 
