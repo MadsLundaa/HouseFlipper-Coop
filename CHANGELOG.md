@@ -4,6 +4,12 @@
 * **Laying a lot of floor tiles no longer freezes the other player's game**: applying a batch of tile changes compared every new record against every existing one by re-serialising the whole list each time, and the sender re-serialised every record twice a second. In a test, 1000 tile changes at once froze the other game for 3-4 s; now the worst frame was 19 ms. Slow applies are logged with a per-phase timing.
 * **Grass cut by a mower, scythe or flamethrower is shared**: the lawn mask is sent to the other players when somebody stops cutting, and to a player who joins later. Verified: identical mask on both players after a cut.
 * **An outdated-version notice** (text only, no links) is shown when a newer release exists (setting `CheckForUpdates`).
+* **Buying and placing objects and doors counts toward the job for the other player**, and door/window installations raise the game's installation event on the other player (checked in the Christmas Carol Past job: the door purchase progress synced).
+* **Light bulbs**: a bulb broken or repaired by one player is applied to the other and the repair quests recount on it (checked on a job house: identical bulb states on both players).
+* **The bunker entrance (and other doors/hatches the game does not give an id)** is addressed by its scene path, so it opens for both players (checked: all 30 doors, windows and hatches of the bunker job matched after toggling them).
+* **Shower and other mount progress** is retried when the device is not there yet, so a "mounted" message is no longer lost (checked: a shower mounted by the host was mounted for the client).
+* **Job items sold by any path are noticed** (every scene item is watched, not only the ones that were moved) and stale office doors from an earlier house are cleared when a house changes.
+* **A failing quest can no longer hang a house load**: load-time event raisers are guarded one subscriber at a time.
 
 ## 0.5.2
 * **A client's item from a Workshop addon the host does not have is refused**: the host cannot build it (and the game would have paid the host the item's price for a "missing" item), so it drops the event, does not pass it on to the other players, and tells the client, which sells the item back with the game's own sale (the refund the game gives for a missing item). Verified with a client holding an addon the host lacks.
