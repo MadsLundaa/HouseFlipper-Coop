@@ -9,7 +9,7 @@ namespace HFCoop
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "dev.hfcoop";
-        public const string Version = "0.5.2";
+        public const string Version = "0.5.3";
         internal static ManualLogSource Log;
         internal static string GameBuild = "";
 
@@ -77,7 +77,7 @@ namespace HFCoop
             if (Input.GetKeyDown(KeyCode.F2) && Input.GetKey(KeyCode.LeftControl)) Inspector.NudgeAimedItem();
             if (Input.GetKeyDown(KeyCode.F11) && Input.GetKey(KeyCode.LeftControl)) SteamProbe.Toggle();
             if (Input.GetKeyDown(KeyCode.F12) && Input.GetKey(KeyCode.LeftControl)) Session.DebugDrop(); // simulates a network failure (reconnect test)
-            SteamProbe.Tick();
+            SteamProbe.Tick(); UpdateCheck.Tick();
             if (Input.GetKeyDown(Cfg.MenuKey.Value)) _menu = !_menu;
             if (Input.GetKeyDown(Cfg.HostKey.Value)) Session.StartHost();
             if (Input.GetKeyDown(Cfg.JoinKey.Value)) Session.StartJoin(Cfg.JoinAddress.Value);
@@ -110,6 +110,12 @@ namespace HFCoop
             st.normal.textColor = Color.black; GUI.Label(new Rect(11, 11, 600, 20), badge, st);
             st.normal.textColor = Session.LastError.Length > 0 ? new Color(1f, 0.5f, 0.4f) : Color.white; GUI.Label(new Rect(10, 10, 600, 20), badge, st);
             if (Session.LastError.Length > 0 && Session.Role == Role.None) { st.normal.textColor = new Color(1f, 0.5f, 0.4f); GUI.Label(new Rect(10, 28, 800, 20), Session.LastError, st); }
+            if (UpdateCheck.Outdated)
+            {
+                float uy = Session.LastError.Length > 0 && Session.Role == Role.None ? 46f : 28f;
+                st.normal.textColor = Color.black; GUI.Label(new Rect(11, uy + 1, 700, 20), "Co-op mod: you have an outdated version", st);
+                st.normal.textColor = new Color(1f, 0.85f, 0.4f); GUI.Label(new Rect(10, uy, 700, 20), "Co-op mod: you have an outdated version", st);
+            }
             if (SteamProbe.Status.Length > 0)
             {
                 st.normal.textColor = Color.black; GUI.Label(new Rect(11, 47, 900, 20), "Steam probe: " + SteamProbe.Status, st);
@@ -149,6 +155,7 @@ namespace HFCoop
         void DrawWin(int id)
         {
             GUILayout.Label("Status: " + Session.Status);
+            if (UpdateCheck.Outdated) GUILayout.Label("<color=#ffd966>You have an outdated version of this mod.</color>");
             if (Session.LastError.Length > 0) GUILayout.Label("<color=#ff8866>" + Session.LastError + "</color>");
             GUILayout.Label("House: " + (SceneName.Length > 0 ? SceneName : "(none - main menu)"));
             if (SceneName.Length == 0 && Session.Role == Role.None) GUILayout.Label("Lobby: host from here and load your save, or join from here and you will be taken into the host's house.");

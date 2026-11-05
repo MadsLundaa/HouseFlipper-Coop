@@ -159,7 +159,7 @@ namespace HFCoop
             string g = ItemSync.GuidOfPublic(c);
             if (!string.IsNullOrEmpty(g)) return "g:" + g;
             var item = c.GetComponentInParent<Item>();
-            if (item == null) return null;
+            if (item == null) return "p:" + Inspector.Path(c.transform) + "|" + c.GetType().Name; // a scene object the guid table does not know: both peers loaded the same scene, so the path is the same
             string ig = ItemSync.NetIdPublic(item, true); // scene guid ("s:...") or the net id of an item created during the session ("c:...")
             if (string.IsNullOrEmpty(ig)) return null;
             ItemSync.EnsureSent(item); // a brand-new item must reach the other peer before it is used there
@@ -171,6 +171,14 @@ namespace HFCoop
         public static Component Resolve(string key)
         {
             if (key.StartsWith("g:")) return ItemSync.FromGuidPublic(key.Substring(2));
+            if (key.StartsWith("p:"))
+            {
+                int bar = key.LastIndexOf('|'); if (bar < 0) return null;
+                string path = key.Substring(2, bar - 2), type = key.Substring(bar + 1);
+                foreach (var c in Resources.FindObjectsOfTypeAll<Empyrean.HouseFlipper.Core.Interactions.Interactable>())
+                    if (c != null && c.gameObject.scene.IsValid() && c.GetType().Name == type && Inspector.Path(c.transform) == path) return c;
+                return null;
+            }
             if (!key.StartsWith("i:")) return null;
             var parts = key.Substring(2).Split('|');
             var item = (parts[0].StartsWith("s:") || parts[0].StartsWith("c:") || parts[0].StartsWith("w:") || parts[0].StartsWith("n:") ? ItemSync.ByNetId(parts[0]) : ItemSync.FromGuidPublic(parts[0])) as Item; if (item == null) return null;

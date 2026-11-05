@@ -53,6 +53,52 @@ namespace HFCoop
             catch (Exception e) { Plugin.Log.LogWarning("[guard] quest patch failed: " + e.Message); }
         }
 
+        // ---- one failing subscriber must not end the house load ----
+        // While a save is applied the game raises a few plain "walls/rooms are ready" events from the load coroutine, and every subscriber runs in one delegate call: an exception in
+        // one (a queued door placement whose objects belong to the house that was just left, seen as a NullReferenceException in WallInstallation.InitializePlaced) ended the
+        // coroutine and the game sat on the loading screen for ever. These raisers now call each subscriber on its own and log what fails.
+        static readonly System.Collections.Generic.Dictionary<MethodBase, FieldInfo> _raisers = new System.Collections.Generic.Dictionary<MethodBase, FieldInfo>();
+
+        public static void PatchLoadRaisers(Harmony h)
+        {
+            try
+            {
+                var hub = GameEvents.Hub; if (hub == null) { Plugin.Log.LogWarning("[guard] event hub not found: load raisers are not protected"); return; }
+                Type co = null;
+                foreach (var nt in typeof(HouseSaveManager).GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public)) if (nt.Name.Contains("ApplyRecordingToScenesCor")) { co = nt; break; }
+                var mn = co != null ? co.GetMethod("MoveNext", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public) : null;
+                if (mn == null) { Plugin.Log.LogWarning("[guard] load coroutine not found: load raisers are not protected"); return; }
+                var il = mn.GetMethodBody().GetILAsByteArray(); int n = 0;
+                for (int i = 0; i + 4 < il.Length; i++)
+                {
+                    if (il[i] != 0x28) continue;
+                    MethodBase cb; try { cb = mn.Module.ResolveMethod(BitConverter.ToInt32(il, i + 1)); } catch { continue; }
+                    var mi = cb as MethodInfo;
+                    if (mi == null || !mi.IsStatic || mi.DeclaringType != hub || mi.ReturnType != typeof(void) || mi.GetParameters().Length != 0 || _raisers.ContainsKey(mi)) continue;
+                    // the raiser loads one static Action field and invokes it
+                    FieldInfo fld = null; var ril = mi.GetMethodBody().GetILAsByteArray();
+                    for (int k = 0; k + 4 < ril.Length && fld == null; k++) if (ril[k] == 0x7E) { try { var f = mi.Module.ResolveField(BitConverter.ToInt32(ril, k + 1)); if (f != null && f.FieldType == typeof(Action)) fld = f; } catch { } }
+                    if (fld == null) continue;
+                    _raisers[mi] = fld;
+                    h.Patch(mi, prefix: new HarmonyMethod(typeof(RecordingGuard), "SafeRaise")); n++;
+                }
+                Plugin.Log.LogInfo("[guard] " + n + " load event raiser(s) call their subscribers one by one");
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[guard] load raiser patch failed: " + e.Message); }
+        }
+
+        static bool SafeRaise(MethodBase __originalMethod)
+        {
+            FieldInfo fld; if (!_raisers.TryGetValue(__originalMethod, out fld)) return true;
+            var d = fld.GetValue(null) as Action; if (d == null) return false;
+            foreach (var a in d.GetInvocationList())
+            {
+                try { ((Action)a)(); }
+                catch (Exception e) { if (_qErr++ < 10) Plugin.Log.LogWarning("[guard] a subscriber of a load event failed and was skipped (" + a.Method.DeclaringType.Name + "): " + (e.InnerException ?? e).GetType().Name + " " + (e.InnerException ?? e).Message); }
+            }
+            return false;
+        }
+
         static int _qErr;
         static Exception QuestFinalizer(Exception __exception)
         {

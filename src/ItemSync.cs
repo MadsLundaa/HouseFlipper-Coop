@@ -55,7 +55,26 @@ namespace HFCoop
         public static void RegisterCreated(string id, Item it) { CreatedById[id] = it; CreatedId[it] = id; }
         public static void QueuePublic(Item it) { Queue(it); }
         /// <summary>The host loaded another house: what was pending or remembered belongs to the old one.</summary>
-        public static void OnHouseChanged() { Pending.Clear(); PendingDeleted.Clear(); LastJson.Clear(); Seen.Clear(); }
+        public static void OnHouseChanged() { Pending.Clear(); PendingDeleted.Clear(); LastJson.Clear(); Seen.Clear(); _sceneWatched = false; }
+
+        // every item of the house that has a scene guid is watched for disappearing, not only the ones that were sent or received: a job item sold by a path the sold-event hook
+        // does not see (bulk sales, the furniture-removal jobs) was only ever noticed when it had been touched before, so some sales never reached the other player
+        static bool _sceneWatched;
+        static void WatchSceneItems()
+        {
+            try
+            {
+                int n = 0;
+                foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                {
+                    if (it == null || !it.gameObject.scene.IsValid() || !it.gameObject.activeInHierarchy) continue;
+                    string g = GuidOf(it); if (string.IsNullOrEmpty(g)) continue;
+                    string id = "s:" + g; if (!Seen.ContainsKey(id)) { Seen[id] = it; n++; }
+                }
+                Plugin.Log.LogInfo("[item] watching " + n + " more scene item(s) for sales");
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[item] could not watch the scene items: " + e.Message); }
+        }
         /// <summary>Tell the other peers this item is gone (a sold door/window whose installation record disappeared).</summary>
         public static void AnnounceGone(string id) { if (Session.Active && !Events.Applying && !PendingDeleted.Contains(id)) PendingDeleted.Add(id); }
         public static string DevIds(string prefix) { var sb = new System.Text.StringBuilder(); foreach (var kv in CreatedById) if (kv.Key.StartsWith(prefix) && kv.Value != null) sb.AppendLine(kv.Key + " " + kv.Value.name); return sb.ToString(); }
@@ -295,7 +314,7 @@ namespace HFCoop
             Plugin.Log.LogInfo("[item] imported " + n + " created-item ids");
         }
 
-        public static void Reset() { Seen.Clear(); CreatedId.Clear(); CreatedById.Clear(); LastJson.Clear(); Pending.Clear(); PendingDeleted.Clear(); }
+        public static void Reset() { _sceneWatched = false; Seen.Clear(); CreatedId.Clear(); CreatedById.Clear(); LastJson.Clear(); Pending.Clear(); PendingDeleted.Clear(); }
 
         // ---------- hooks ----------
         public static void Patch(Harmony h)
@@ -374,6 +393,7 @@ namespace HFCoop
             if (!Session.Active) { Pending.Clear(); PendingDeleted.Clear(); return; }
             ScanDestroyed();
             bool settled = Settled();
+            if (settled && !_sceneWatched) { _sceneWatched = true; WatchSceneItems(); }
             if (settled && Time.realtimeSinceStartup < _assignUntil && Time.realtimeSinceStartup > _assignNext) { _assignNext = Time.realtimeSinceStartup + 3f; AssignAnonymousIdsNow(); }
             foreach (var id in PendingDeleted)
             {

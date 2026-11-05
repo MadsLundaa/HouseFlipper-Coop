@@ -28,7 +28,7 @@ namespace HFCoop
             if (!Pending.Contains(__0)) Pending.Add(__0);
         }
 
-        public static void Reset() { Pending.Clear(); Quiet.Clear(); }
+        public static void Reset() { Pending.Clear(); Quiet.Clear(); _retry.Clear(); }
 
         // ---- water from a device we did not place ----
         // An unmounted device leaks: its MontageControl re-creates a cleanable puddle every 12 s once it is initialised. The player who places a device never
@@ -83,7 +83,7 @@ namespace HFCoop
         /// <summary>Called right after ItemSync.Tick so that a device item created a moment ago reaches the other peer before its "mounted" message.</summary>
         public static void Tick()
         {
-            QuietTick();
+            QuietTick(); RetryTick();
             if (Pending.Count == 0) return;
             var list = new List<MountableDevice>(Pending); Pending.Clear();
             foreach (var d in list)
@@ -125,16 +125,35 @@ namespace HFCoop
             Plugin.Log.LogInfo("[mount] device " + label + " mounted by another player");
         }
 
-        public static bool Apply(string id)
+        // a device that is not here yet (its item still being created) is retried for a while instead of the message being lost
+        static readonly List<KeyValuePair<string, double>> _retry = new List<KeyValuePair<string, double>>();
+        static double _nextRetry;
+
+        static void RetryTick()
+        {
+            if (_retry.Count == 0 || Time.realtimeSinceStartup < _nextRetry) return;
+            _nextRetry = Time.realtimeSinceStartup + 1.0;
+            for (int i = _retry.Count - 1; i >= 0; i--)
+            {
+                var r = _retry[i];
+                if (Time.realtimeSinceStartup > r.Value) { _retry.RemoveAt(i); Plugin.Log.LogWarning("[mount] gave up mounting " + r.Key); continue; }
+                bool was = Events.Applying; Events.Applying = true;
+                try { if (Apply(r.Key, true)) _retry.RemoveAt(i); } catch (Exception e) { Plugin.Log.LogWarning("[mount] retry failed: " + e.Message); _retry.RemoveAt(i); } finally { Events.Applying = was; }
+            }
+        }
+
+        public static bool Apply(string id) { return Apply(id, false); }
+
+        static bool Apply(string id, bool retrying)
         {
             if (id.StartsWith("p:"))
             {
                 var wd = ByPath(id.Substring(2));
-                if (wd == null) { Plugin.Log.LogWarning("[mount] unknown wall device " + id); return false; }
+                if (wd == null) { if (!retrying) { Plugin.Log.LogInfo("[mount] wall device " + id + " is not here yet: trying again"); _retry.Add(new KeyValuePair<string, double>(id, Time.realtimeSinceStartup + 30.0)); } return false; }
                 MountDevice(wd, id); return true;
             }
             var item = ItemSync.ByNetId(id);
-            if (item == null) { Plugin.Log.LogWarning("[mount] unknown device item " + id); return false; }
+            if (item == null) { if (!retrying) { Plugin.Log.LogInfo("[mount] device " + id + " is not here yet: trying again"); _retry.Add(new KeyValuePair<string, double>(id, Time.realtimeSinceStartup + 30.0)); } return false; }
             var md = item.GetComponentInChildren<MountableDevice>();
             if (md == null) { Plugin.Log.LogWarning("[mount] item " + id + " has no MountableDevice"); return false; }
             if (md.IsFullyMounted()) return true;

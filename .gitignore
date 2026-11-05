@@ -16,3 +16,10 @@ bepinex-installed-files.txt
 *.user
 .vs/
 third_party/
+
+# private developer/admin tool (never published)
+admin/
+
+# local test harness leftovers
+tools/hostonly.*
+tools/*.out

@@ -19,6 +19,7 @@ namespace HFCoop
         {
             public string Field; public string[] Apply; public FieldInfo Fi; public Type Elem;
             public readonly HashSet<string> Known = new HashSet<string>();
+            public int LastCount = -1; public double LastFull;
             public bool Primed;
         }
 
@@ -75,7 +76,7 @@ namespace HFCoop
             return h != null && h.Recorder != null ? h.Recorder.currentRecording : null;
         }
 
-        public static void Reset() { foreach (var t in Tracks) { t.Known.Clear(); t.Primed = false; } }
+        public static void Reset() { foreach (var t in Tracks) { t.Known.Clear(); t.Primed = false; t.LastCount = -1; } }
 
         /// <summary>Mark everything currently in the recording as already synchronised (called after joining / when a session starts).</summary>
         public static void Prime()
@@ -91,23 +92,31 @@ namespace HFCoop
             }
         }
 
-        static double _meshAt;
-        /// <summary>Rebuild the combined wall meshes shortly (after walls were swapped/removed by a remote change; the game does it from its own tool code).</summary>
-        public static void RequestMeshRebuild() { _meshAt = Time.realtimeSinceStartup + 0.5; }
+        static double _meshAt, _lastMesh; static bool _meshWalls, _meshFloors;
+        /// <summary>Rebuild the combined meshes shortly (after walls/floors were changed by a remote change; the game does it from its own tool code). Requests are merged and a rebuild
+        /// never starts sooner than 3 s after the previous one: rebuilding a whole house takes seconds, and a player laying many tiles used to freeze the others for several seconds at a time.</summary>
+        public static void RequestMeshRebuild() { RequestMeshRebuild(true, true); }
+        public static void RequestMeshRebuild(bool walls, bool floors)
+        {
+            _meshWalls |= walls; _meshFloors |= floors;
+            if (_meshAt <= 0) _meshAt = Math.Max(Time.realtimeSinceStartup + 0.5, _lastMesh + 3.0);
+        }
 
         static void MeshTick()
         {
             if (_meshAt <= 0 || Time.realtimeSinceStartup < _meshAt) return;
-            _meshAt = 0;
+            _meshAt = 0; bool doWalls = _meshWalls, doFloors = _meshFloors; _meshWalls = _meshFloors = false;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 int n = 0;
-                foreach (var c in UnityEngine.Object.FindObjectsOfType<WallsMeshCombiner>()) { c.BuildAll(); n++; }
+                if (doWalls) foreach (var c in UnityEngine.Object.FindObjectsOfType<WallsMeshCombiner>()) { c.BuildAll(); n++; }
                 int fl = 0;
-                foreach (var c in UnityEngine.Object.FindObjectsOfType<Code.HouseBuildingBlocks.FloorTilesCombiner>()) { c.Rebuild(); fl++; }
-                Plugin.Log.LogInfo("[rec] rebuilt " + n + " combined wall mesh(es) and " + fl + " floor tile mesh(es)");
+                if (doFloors) foreach (var c in UnityEngine.Object.FindObjectsOfType<Code.HouseBuildingBlocks.FloorTilesCombiner>()) { c.Rebuild(); fl++; }
+                Plugin.Log.LogInfo("[rec] rebuilt " + n + " combined wall mesh(es) and " + fl + " floor tile mesh(es) in " + sw.ElapsedMilliseconds + " ms");
             }
             catch (Exception e) { Plugin.Log.LogWarning("[rec] wall mesh rebuild failed: " + (e.InnerException ?? e).Message); }
+            _lastMesh = Time.realtimeSinceStartup;
         }
 
         public static void Tick()
@@ -122,6 +131,9 @@ namespace HFCoop
             {
                 var list = t.Fi.GetValue(rec) as IList; if (list == null) continue;
                 if (!t.Primed) { Prime(); return; }
+                // serialising every entry of a big list (thousands of floor tiles) twice a second is a hitch of its own: do the full pass when the list grew or shrank, otherwise only every few seconds (in-place edits)
+                if (list.Count == t.LastCount && Time.realtimeSinceStartup - t.LastFull < 3.0) continue;
+                t.LastCount = list.Count; t.LastFull = Time.realtimeSinceStartup;
                 List<string> fresh = null;
                 foreach (var e in list)
                 {
@@ -322,6 +334,15 @@ namespace HFCoop
 
         public static bool Apply(string field, string jsonArray)
         {
+            var lapSw = System.Diagnostics.Stopwatch.StartNew(); var laps = new System.Text.StringBuilder(); // per-phase timing, logged only when the whole apply is slow
+            Action<string> lap = nm => { laps.Append(nm + "=" + lapSw.ElapsedMilliseconds + "ms "); lapSw.Reset(); lapSw.Start(); };
+            var total = System.Diagnostics.Stopwatch.StartNew();
+            try { return ApplyTimed(field, jsonArray, lap); }
+            finally { lapSw.Stop(); if (total.ElapsedMilliseconds > 150) Plugin.Log.LogInfo("[rec] slow apply of " + field + ": " + total.ElapsedMilliseconds + " ms (" + laps + ")"); }
+        }
+
+        static bool ApplyTimed(string field, string jsonArray, Action<string> lap)
+        {
             if (!_built) Build();
             Track t = Tracks.Find(x => x.Field == field);
             if (t == null) { Plugin.Log.LogWarning("[rec] unknown field " + field); return false; }
@@ -333,10 +354,12 @@ namespace HFCoop
             var arr = Newtonsoft.Json.Linq.JArray.Parse(jsonArray);
             foreach (var tok in arr) t.Known.Add(tok.ToString(Formatting.None));
             if (ZoomFix && (field == "cleanedWindowsGuids" || field == "extendedDirts")) ReleaseWindowZoom(field, arr);
+            lap("parse");
             // partial recording containing only the new elements
             var partial = new Recording();
             t.Fi.SetValue(partial, parsed);
             try { partial.RestoreHardRefs(); } catch (Exception e) { Plugin.Log.LogWarning("[rec] RestoreHardRefs: " + e.Message); } // resolves material guids -> Material objects
+            lap("restoreRefs");
             var hsm = typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null);
             bool isWallField = field == "modifiedWalls" || field == "modifiedOuterWalls";
             if (isWallField || field == "modifiedWallSides" || field == "modifiedFloors" || field == "modifiedCeilings") PurgeWallLists();
@@ -354,8 +377,13 @@ namespace HFCoop
                 }
                 catch (Exception e) { Plugin.Log.LogError("[rec] " + name + " failed: " + (e.InnerException ?? e)); }
             }
+            lap("gameApply");
             if (isWallField) ProgressSync.Rebase();
-            if (field == "modifiedFloors" || field == "modifiedCeilings") RequestMeshRebuild(); // the floors are drawn by combined meshes: the loader only swaps the tile material
+            if (field == "modifiedFloors" || field == "modifiedCeilings") RequestMeshRebuild(false, true); // only the floor tile meshes
+            if (field == "modifiedFloors") GameEvents.RaiseFloorsChanged();
+            lap("floorEvent");
+            if (field == "brokenSubitems")
+                foreach (var o in parsed) { var bs = o as BreakableSubitem; if (bs != null) GameEvents.RaiseSubitem(ItemSync.FromGuidPublic(bs.itemGuid) as Item, bs.subitemIndex, bs.state); } // the floors are drawn by combined meshes: the loader only swaps the tile material
             foreach (var kv in WallSidePatch.Touched) { try { if (kv.Key != null) { kv.Key.FinalizePaintProcess(kv.Value); } } catch (Exception e) { Plugin.Log.LogWarning("[rec] FinalizePaintProcess: " + e.Message); } }
             if (field == "modifiedWallSides" || field == "modifiedFloors" || field == "modifiedCeilings" || field == "modifiedStandaloneWallSides")
             {
@@ -366,13 +394,14 @@ namespace HFCoop
             // keep our own recording (what the host saves) consistent
             var local = t.Fi.GetValue(rec) as IList;
             if (local != null)
+            {
+                // one set of the existing entries instead of re-serialising the whole local list for every new entry (hundreds of floor tiles at once took seconds)
+                var have = new HashSet<string>();
+                foreach (var e in local) have.Add(JsonConvert.SerializeObject(e, Ser));
                 for (int i = 0; i < parsed.Count; i++)
-                {
-                    string js = JsonConvert.SerializeObject(parsed[i], Ser);
-                    bool have = false;
-                    foreach (var e in local) { if (JsonConvert.SerializeObject(e, Ser) == js) { have = true; break; } }
-                    if (!have) local.Add(parsed[i]);
-                }
+                    if (have.Add(JsonConvert.SerializeObject(parsed[i], Ser))) local.Add(parsed[i]);
+            }
+            lap("syncLocal");
             if (field == "modifiedWalls") RegisterBuiltWalls(parsed);
             if (field == "pileOfRubbishModifications" || field == "pileOfSnowModifications") RaisePiles(parsed);
             if (field == "modifiedReplaceableItems") RaiseReplaced(parsed);

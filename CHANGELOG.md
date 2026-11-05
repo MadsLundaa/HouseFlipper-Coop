@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+* **Laying a lot of floor tiles no longer freezes the other player's game**: applying a batch of tile changes compared every new record against every existing one by re-serialising the whole list each time, and the sender re-serialised every record twice a second. In a test, 1000 tile changes at once froze the other game for 3-4 s; now the worst frame was 19 ms. Slow applies are logged with a per-phase timing.
+* **Grass cut by a mower, scythe or flamethrower is shared**: the lawn mask is sent to the other players when somebody stops cutting, and to a player who joins later. Verified: identical mask on both players after a cut.
+* **An outdated-version notice** (text only, no links) is shown when a newer release exists (setting `CheckForUpdates`).
+
 ## 0.5.2
 * **A client's item from a Workshop addon the host does not have is refused**: the host cannot build it (and the game would have paid the host the item's price for a "missing" item), so it drops the event, does not pass it on to the other players, and tells the client, which sells the item back with the game's own sale (the refund the game gives for a missing item). Verified with a client holding an addon the host lacks.
 * **A door/window that is open on the host is open for a client that joins**: a "use" is a toggle and the open state is not saved with the house, so a joining client had every door closed and the host closing its open door opened it on the client. The host now counts the uses of every two-state door/window/lid since the house was loaded and replays the odd ones to a client when it reports its house is loaded (verified: the host opened a window and the front door before the client joined, the client received both).

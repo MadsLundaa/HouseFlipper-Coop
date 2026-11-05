@@ -16,7 +16,7 @@ namespace HFCoop
         {
             _h = new Harmony(Plugin.Guid);
             ItemSync.Patch(_h);
-            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h); RecordingGuard.Patch(_h); RecordingGuard.PatchQuests(_h); Workshop.Patch(_h);
+            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h); RecordingGuard.Patch(_h); RecordingGuard.PatchQuests(_h); RecordingGuard.PatchLoadRaisers(_h); GrassSync.Patch(_h); Workshop.Patch(_h);
             var save = AccessTools.Method(typeof(HouseSaveManager), "SaveRecordedGame");
             if (save != null) _h.Patch(save, prefix: new HarmonyMethod(typeof(Events), "BlockClientSave"));
             else Plugin.Log.LogWarning("[save] SaveRecordedGame not found - client saves are NOT blocked");
@@ -34,7 +34,7 @@ namespace HFCoop
                 var h = Held.ToArray(); Held.Clear();
                 foreach (var kv in h) { var rr = new R(kv.Value); Handle(kv.Key, rr.Type, rr, kv.Value); }
             }
-            Watchdog.Phase("evt.item"); ItemSync.Tick(); Workshop.Tick(); InstSync.Tick(); MountSync.Tick(); LightSync.Tick(); Watchdog.Phase("evt.rec"); RecSync.Tick(); Watchdog.Phase("evt.money"); MoneySync.Tick(); ProgressSync.Tick(); FollowHost.Tick(); ClockSync.Tick(); DaySync.Tick(); JobSync.Tick(); CarrySync.Tick();
+            Watchdog.Phase("evt.item"); ItemSync.Tick(); GrassSync.Tick(); Workshop.Tick(); InstSync.Tick(); MountSync.Tick(); LightSync.Tick(); Watchdog.Phase("evt.rec"); RecSync.Tick(); Watchdog.Phase("evt.money"); MoneySync.Tick(); ProgressSync.Tick(); FollowHost.Tick(); ClockSync.Tick(); DaySync.Tick(); JobSync.Tick(); CarrySync.Tick();
         }
 
         public static void OnSessionStart() { MoneySync.OnSessionStart(); if (Session.Role == Role.Host) ItemSync.AssignAnonymousIds(); }
@@ -75,7 +75,7 @@ namespace HFCoop
             // follows a few seconds later; until then the client ignores events, and the host ignores a client's events until it reports "ready" in the new house.
             if (Session.Role == Role.Client && kind == "house" && key == "changing") { Snapshot.SuspendEvents(); return; }
             if (Session.Role == Role.Client && Snapshot.EventsSuspended && kind != "house") return;
-            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); Interactions.SendStatesTo(from); return; }
+            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); Interactions.SendStatesTo(from); GrassSync.SendTo(from); return; }
             if (Session.Role == Role.Host && kind != "house" && FollowHost.IsPending(origin)) return;
             bool ok = false;
             Applying = true;
@@ -97,6 +97,7 @@ namespace HFCoop
                     case "light": ok = LightSync.Apply(key, json); break;
                     case "devcmd": ok = Dev.RunRemote(json); break;
                     case "workshop": ok = Workshop.OnMessage(key, json); break;
+                    case "grass": ok = GrassSync.Apply(key, json); break;
                     default: Plugin.Log.LogWarning("[evt] unknown event kind " + kind); break;
                 }
             }

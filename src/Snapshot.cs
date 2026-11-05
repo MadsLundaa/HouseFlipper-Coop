@@ -147,7 +147,7 @@ namespace HFCoop
 
         static void Begin(Recording rec, HouseSaveManager h)
         {
-            _suspended = false;
+            _suspended = false; InstSync.MarkOldDoors();
             Ready = false; Events.Applying = true; Loading = true; Tainted = true; _sawLoadStart = false; _loadStart = Session.Now;
             Session.Status = "Loading host's house...";
             ItemSync.Reset(); RecSync.Reset();

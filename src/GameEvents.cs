@@ -14,6 +14,7 @@ namespace HFCoop
     internal static class GameEvents
     {
         static MethodInfo _place, _sold, _soldArgs, _wallAdded, _replaced; static Type _hub; static bool _looked;
+        public static Type Hub { get { Look(); return _hub; } }
 
         static void Look()
         {
@@ -156,6 +157,78 @@ namespace HFCoop
                             if (f.FieldType == typeof(Item)) f.SetValue(q, item);
             }
             catch (Exception e) { Plugin.Log.LogWarning("[events] could not aim the replacement quests: " + e.Message); }
+        }
+
+        // ---- floors tiled by another player: the floor-tiling quests recount on two "floors changed" events that carry a list of floors (grouped by storey) ----
+        static List<FieldInfo> _floorEvents;
+        public static void RaiseFloorsChanged()
+        {
+            Look();
+            try
+            {
+                if (_hub == null) return;
+                if (_floorEvents == null) { _floorEvents = new List<FieldInfo>(); foreach (var f in _hub.GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)) if (f.FieldType == typeof(Action<List<Code.HouseBuildingBlocks.Floor>>)) _floorEvents.Add(f); }
+                var groups = new Dictionary<int, List<Code.HouseBuildingBlocks.Floor>>();
+                foreach (var fl in UnityEngine.Object.FindObjectsOfType<Code.HouseBuildingBlocks.Floor>())
+                {
+                    if (fl == null) continue; int k = Mathf.RoundToInt(fl.transform.position.y * 10f);
+                    List<Code.HouseBuildingBlocks.Floor> l; if (!groups.TryGetValue(k, out l)) groups[k] = l = new List<Code.HouseBuildingBlocks.Floor>(); l.Add(fl);
+                }
+                foreach (var g in groups.Values)
+                    foreach (var f in _floorEvents) { try { var d = f.GetValue(null) as Action<List<Code.HouseBuildingBlocks.Floor>>; if (d != null) d(g); } catch (Exception e) { Plugin.Log.LogWarning("[events] floor quest refresh failed: " + (e.InnerException ?? e).Message); } }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[events] floors changed failed: " + e.Message); }
+        }
+
+        // ---- a breakable part (a lamp's bulb) changed by another player: raise the hub event (static void (device, int index, state)) the repair quests count on ----
+        static MethodInfo _subRaise; static bool _subLooked;
+        public static void RaiseSubitem(Item item, int index, object state)
+        {
+            try
+            {
+                Look();
+                if (!_subLooked)
+                {
+                    _subLooked = true;
+                    if (_hub != null)
+                        foreach (var m in _hub.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                        {
+                            var ps = m.GetParameters();
+                            if (m.ReturnType == typeof(void) && ps.Length == 3 && ps[1].ParameterType == typeof(int) && ps[0].ParameterType.GetMethod("LoadSubitemState") != null) { _subRaise = m; break; }
+                        }
+                    Plugin.Log.LogInfo("[events] bulb/part event raiser " + (_subRaise != null ? _subRaise.Name : "not found"));
+                }
+                if (_subRaise == null || item == null) return;
+                var dev = item.GetComponent(_subRaise.GetParameters()[0].ParameterType); if (dev == null) return;
+                _subRaise.Invoke(null, new object[] { dev, index, state });
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[events] part event failed: " + (e.InnerException ?? e).Message); }
+        }
+
+        // ---- a door/window installation made by another player: the "installation changed" event of the wall-modifier hub (static void (WallInstallation, bool, bool)) ----
+        static MethodInfo _instRaise; static bool _instLooked;
+        public static void RaiseInstallation(Empyrean.HouseFlipper.WallModifiers.WallInstallation wi)
+        {
+            try
+            {
+                if (!_instLooked)
+                {
+                    _instLooked = true;
+                    foreach (var ty in typeof(Item).Assembly.GetTypes())
+                    {
+                        if (!ty.IsAbstract || !ty.IsSealed) continue;
+                        foreach (var m in ty.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                        {
+                            var ps = m.GetParameters();
+                            if (m.ReturnType == typeof(void) && ps.Length == 3 && ps[0].ParameterType == typeof(Empyrean.HouseFlipper.WallModifiers.WallInstallation) && ps[1].ParameterType == typeof(bool) && ps[2].ParameterType == typeof(bool)) { _instRaise = m; break; }
+                        }
+                        if (_instRaise != null) break;
+                    }
+                    Plugin.Log.LogInfo("[events] installation event raiser " + (_instRaise != null ? _instRaise.DeclaringType.Name + "." + _instRaise.Name : "not found"));
+                }
+                if (_instRaise != null && wi != null) _instRaise.Invoke(null, new object[] { wi, false, false });
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[events] installation event failed: " + (e.InnerException ?? e).Message); }
         }
 
         public static bool RaiseReplaced(HF.Replaceable.Replaceable rep)

@@ -319,6 +319,11 @@ namespace HFCoop
                         break;
                     }
                 case "tell": Events.Send("devcmd", "", line.Substring(5)); break; // tell <command>: run a dev command on the other peers
+                case "updatecheck": UpdateCheck.Run(a.Length > 1 ? a[1] : Plugin.Version); break; // updatecheck [pretend current version]
+                case "floorevent": GameEvents.RaiseFloorsChanged(); Plugin.Log.LogInfo("[dev] floors changed event raised"); break;
+                case "cutgrass": { var mmg = UnityEngine.Object.FindObjectOfType<MowableManager>(); if (mmg == null) { Plugin.Log.LogInfo("[dev] no lawn"); break; } mmg.CutAllGrass(); Plugin.Log.LogInfo("[dev] cut all grass"); break; }
+                case "grasshash": { var ga = UnityEngine.Object.FindObjectOfType<Moonlit.GrassMowing.MowingArea>(); if (ga == null) { Plugin.Log.LogInfo("[dev] no lawn"); break; } var gt = ga.GetTexture(); var gp = gt.EncodeToPNG(); long gs = 0; foreach (var gb in gp) gs = gs * 31 + gb; Plugin.Log.LogInfo("[dev] grass mask " + gt.width + "x" + gt.height + " " + gt.format + " png " + gp.Length + " bytes hash " + gs); break; }
+                case "grasssend": GrassSync.DevSend(); break;
                 case "wlist": foreach (var w in Resources.FindObjectsOfTypeAll<Item>()) if (w.gameObject.scene.IsValid() && w.gameObject.activeInHierarchy && w.itemData != null && w.itemData.prefabGuid != null && w.itemData.prefabGuid.StartsWith("CustomItem_")) Plugin.Log.LogInfo("[dev] workshop item " + w.itemData.prefabGuid + " " + w.name + " id=" + ItemSync.NetIdPublic(w, false) + " pos=" + w.transform.position.ToString("F2") + " path=" + Inspector.Path(w.transform) + " root=" + (w.transform.root == w.transform) + " comps=" + w.GetComponents<Item>().Length); break;
                 case "office": // office state of this peer: is the loaded house the office, the office PC, held items
                     {

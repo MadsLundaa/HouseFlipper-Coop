@@ -68,6 +68,29 @@ namespace HFCoop
             return it != null ? it : wi.GetComponentInParent<Item>();
         }
 
+        // ---- doors and windows of the house that was just left ----
+        // When the house changes the game sometimes keeps door/window objects of the old house (their leaves floated in the middle of a job house). Everything that is a door or
+        // window while the house changes is remembered; whatever of it is still alive after the new house settled and no record points at is removed on this peer.
+        static readonly HashSet<Item> _oldDoors = new HashSet<Item>();
+
+        static bool IsDoorLike(Item it)
+        {
+            if (it == null || it.itemData == null) return false;
+            try { if (it.IsDoor()) return true; } catch { }
+            return it.GetComponentInParent<Empyrean.HouseFlipper.WallModifiers.WallInstallation>() != null;
+        }
+
+        public static void MarkOldDoors()
+        {
+            try
+            {
+                _oldDoors.Clear();
+                foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
+                    if (it != null && it.gameObject.scene.IsValid() && IsDoorLike(it) && string.IsNullOrEmpty(ItemSync.GuidOfPublic(it))) _oldDoors.Add(it);
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[inst] could not note the old doors: " + e.Message); }
+        }
+
         static void DedupeLive(Recording rec)
         {
             try
@@ -116,7 +139,17 @@ namespace HFCoop
                     var owner = oi.GetComponentInParent<Empyrean.HouseFlipper.WallModifiers.WallInstallation>();
                     if (owner != null && !live.Contains(owner)) UnityEngine.Object.Destroy(owner.gameObject);
                     ItemSync.DiscardLocal(oi); orphans++;
-                }                if (orphans > 0) RecSync.RequestMeshRebuild();
+                }
+                foreach (var od in new List<Item>(_oldDoors))
+                {
+                    if (od == null) { _oldDoors.Remove(od); continue; }
+                    if (!od.gameObject.activeInHierarchy || recItems.Contains(od) || od == CarrySync.HeldNow()) continue;
+                    Plugin.Log.LogWarning("[inst] " + od.name + " belongs to the house that was left but is still standing: removing it on this peer");
+                    var own = od.GetComponentInParent<Empyrean.HouseFlipper.WallModifiers.WallInstallation>();
+                    if (own != null && !live.Contains(own)) UnityEngine.Object.Destroy(own.gameObject);
+                    _oldDoors.Remove(od); ItemSync.DiscardLocal(od); orphans++;
+                }
+                if (orphans > 0) RecSync.RequestMeshRebuild();
             }
             catch (Exception ex) { Plugin.Log.LogWarning("[inst] duplicate check failed: " + ex.Message); }
         }
@@ -129,8 +162,25 @@ namespace HFCoop
             _primed = true; _primedAt = Time.realtimeSinceStartup; _dupAt = Time.realtimeSinceStartup + 2f; _dupRuns = 0;
         }
 
+        // the "installation placed/changed" event the buy-a-door quests count on is raised by the placing tool; for an installation made by another player it is raised
+        // here, once the game has finished setting the installation up (it knows its item a moment later)
+        static readonly List<KeyValuePair<Empyrean.HouseFlipper.WallModifiers.WallInstallation, double>> _raiseLater = new List<KeyValuePair<Empyrean.HouseFlipper.WallModifiers.WallInstallation, double>>();
+
+        static void RaiseDue()
+        {
+            for (int i = _raiseLater.Count - 1; i >= 0; i--)
+            {
+                var wi = _raiseLater[i].Key;
+                if (wi == null || Time.realtimeSinceStartup - _raiseLater[i].Value > 15.0) { _raiseLater.RemoveAt(i); continue; }
+                if (ItemOfInstallation(wi) == null) continue;
+                _raiseLater.RemoveAt(i);
+                GameEvents.RaiseInstallation(wi);
+            }
+        }
+
         public static void Tick()
         {
+            if (_raiseLater.Count > 0) RaiseDue();
             if (!Session.Active || Time.realtimeSinceStartup < _next) return;
             _next = Time.realtimeSinceStartup + 0.5f;
             var rec = Cur(); if (rec == null || rec.wallInstallations == null) return;
@@ -260,6 +310,7 @@ namespace HFCoop
                 if (local == null) rec.wallInstallations.Add(mod); else { local.position = mod.position; local.rotation = mod.rotation; local.variants = mod.variants; local.state = mod.state; local.item = it != null ? it : local.item; mod = local; }
             }
             try { Known[mod] = Json(mod); KnownId[mod] = id; } catch { }
+            if (mod.instance != null) _raiseLater.Add(new KeyValuePair<Empyrean.HouseFlipper.WallModifiers.WallInstallation, double>(mod.instance, Time.realtimeSinceStartup));
             Plugin.Log.LogInfo("[inst] installation " + id + " applied (" + mod.windowGuid + ", state " + mod.state + ")");
             // past the "smash the wall" stage the plug is gone for good
             if (mod.instance != null && (int)mod.state >= 1)
