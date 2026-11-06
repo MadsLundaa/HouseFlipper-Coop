@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+* **Farm weather is shared**: the next weather (clear, clouds, rain) was rolled with `Random` on every player's own game, so rain and sun differed between players after the first change. The host's pick is sent and clients use it (a pick the client rolled first is replaced as soon as the host's arrives). Checked over four forced weather changes: the queued weather was the same on both players every time. The moment a change starts can still differ by the time the second player's house finished loading.
+* **Pets and farm animals are shared**: a pet spawned on the host (adopted, loaded, bought) did not exist for the other player. The host now sends each pet as the game's own save record when it appears (the client builds it with the game's own pet loader), tells when it is gone and sends positions twice a second; a pet that drifted more than 0.75 m is put back (the local AI keeps animating it). Checked with a dog, a cat, a chicken and a cow spawned on the host (the client got the pet and followed its position). Feeding, petting and other pet interactions are not shared yet.
+* **More of the recording is shared**: rolled turf, magnets kept unpainted and prefab swaps (garden / pets / repair jobs) now go to the other player, and hoed soil (farm) is sent too (the soil one has not been verified with real hoeing).
+
 ## 0.5.3
 * **Laying a lot of floor tiles no longer freezes the other player's game**: applying a batch of tile changes compared every new record against every existing one by re-serialising the whole list each time, and the sender re-serialised every record twice a second. In a test, 1000 tile changes at once froze the other game for 3-4 s; now the worst frame was 19 ms. Slow applies are logged with a per-phase timing.
 * **Grass cut by a mower, scythe or flamethrower is shared**: the lawn mask is sent to the other players when somebody stops cutting, and to a player who joins later. Verified: identical mask on both players after a cut.

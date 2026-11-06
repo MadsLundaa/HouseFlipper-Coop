@@ -57,6 +57,11 @@ namespace HFCoop
             // snowdrifts / rubbish heaps that were cleared, and replaced items (stairs, windows...)
             new[] { "pileOfRubbishModifications", "ApplyPiles" },
             new[] { "pileOfSnowModifications", "ApplyPiles" },
+            // garden / pets DLC: turf rolls, magnets that stay unpainted, prefab swaps
+            new[] { "turfCreated", "ApplyTurf" },
+            new[] { "magnetsNeverWhiteAgain", "ApplyNeverWhiteAgain" },
+            new[] { "prefabSwaps", "ApplyPrefabSwaps" },
+            new[] { "placedSoil", "ApplySoil" }, // farm: hoed soil fields (not yet verified with real hoeing)
         };
 
         static void Build()
