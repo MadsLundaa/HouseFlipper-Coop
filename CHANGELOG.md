@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 * **Farm weather is shared**: the next weather (clear, clouds, rain) was rolled with `Random` on every player's own game, so rain and sun differed between players after the first change. The host's pick is sent and clients use it (a pick the client rolled first is replaced as soon as the host's arrives). Checked over four forced weather changes: the queued weather was the same on both players every time. The moment a change starts can still differ by the time the second player's house finished loading.
 * **Pets and farm animals are shared**: a pet spawned on the host (adopted, loaded, bought) did not exist for the other player. The host now sends each pet as the game's own save record when it appears (the client builds it with the game's own pet loader), tells when it is gone and sends positions twice a second; a pet that drifted more than 0.75 m is put back (the local AI keeps animating it). Pets are told apart by their save guid (the first pet has id 0, and pets created together shared an id, so some never arrived). Pets from the joiner's own profile that the game loads into the host's house are removed after the host's list has arrived. Checked with a dog, cat and chicken (id 0) spawned together: all matched on both players. Animations (eating, being petted) are not shared, only positions and stats.
 * **More of the recording is shared**: rolled turf, magnets kept unpainted and prefab swaps (garden / pets / repair jobs) now go to the other player.
