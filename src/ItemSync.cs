@@ -55,7 +55,7 @@ namespace HFCoop
         public static void RegisterCreated(string id, Item it) { CreatedById[id] = it; CreatedId[it] = id; }
         public static void QueuePublic(Item it) { Queue(it); }
         /// <summary>The host loaded another house: what was pending or remembered belongs to the old one.</summary>
-        public static void OnHouseChanged() { Pending.Clear(); PendingDeleted.Clear(); LastJson.Clear(); Seen.Clear(); _sceneWatched = false; }
+        public static void OnHouseChanged() { StateSync.Reset(); Pending.Clear(); PendingDeleted.Clear(); LastJson.Clear(); Seen.Clear(); _sceneWatched = false; }
 
         // every item of the house that has a scene guid is watched for disappearing, not only the ones that were sent or received: a job item sold by a path the sold-event hook
         // does not see (bulk sales, the furniture-removal jobs) was only ever noticed when it had been touched before, so some sales never reached the other player
@@ -79,6 +79,29 @@ namespace HFCoop
         public static void AnnounceGone(string id) { if (Session.Active && !Events.Applying && !PendingDeleted.Contains(id)) PendingDeleted.Add(id); }
         public static string DevIds(string prefix) { var sb = new System.Text.StringBuilder(); foreach (var kv in CreatedById) if (kv.Key.StartsWith(prefix) && kv.Value != null) sb.AppendLine(kv.Key + " " + kv.Value.name); return sb.ToString(); }
         /// <summary>Make sure the other peers learn about this item (a use event may name an item that was created a moment ago).</summary>
+        /// <summary>An item that came with the loaded house but has no id yet gets the shared position id (never a "created here" id: the others already have the item and would make a copy).</summary>
+        public static bool EnsureLoadedId(Item it)
+        {
+            if (it == null || it.itemData == null) return false;
+            if (NetId(it, false) != null) return true;
+            if (string.IsNullOrEmpty(it.itemData.prefabGuid)) return false;
+            var id = PositionId(it); CreatedId[it] = id; CreatedById[id] = it; return true;
+        }
+
+        /// <summary>Remember an item's current saved state as "already known to everybody" without sending it (StateSync watches it from here on).</summary>
+        public static void Baseline(Item it, bool force = false)
+        {
+            if (!Session.Active || it == null || it.itemData == null) return;
+            try
+            {
+                var id = NetId(it, true); if (id == null) return;
+                var mod = new ItemModification { instance = it, sceneGuid = id.StartsWith("s:") ? id.Substring(2) : null, prefabGuid = it.itemData.prefabGuid, currentItemState = it.currentItemState };
+                _mPreSave.Invoke(mod, new object[] { Hsm });
+                if (force || !LastJson.ContainsKey(id)) LastJson[id] = JsonConvert.SerializeObject(mod, Ser);
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[state] baseline failed: " + e.Message); }
+        }
+
         public static void EnsureSent(Item it)
         {
             if (!Session.Active || Events.Applying || it == null) return;
@@ -433,7 +456,12 @@ namespace HFCoop
             bool scene = netId.StartsWith("s:");
             Item inst = null;
             if (scene) { inst = FromGuid(netId.Substring(2)) as Item; mod.sceneGuid = netId.Substring(2); }
-            else { CreatedById.TryGetValue(netId, out inst); if (inst == null) mod.sceneGuid = null; }
+            else
+            {
+                CreatedById.TryGetValue(netId, out inst);
+                if (inst == null && netId.StartsWith("n:")) { inst = ByPosition(netId); if (inst != null && !CreatedId.ContainsKey(inst)) { CreatedId[inst] = netId; CreatedById[netId] = inst; } } // a loaded item this peer had not named yet
+                if (inst == null) mod.sceneGuid = null;
+            }
             if (inst == null && !scene && mod.isDestroyed) return true; // already gone
             if (inst == null && scene)
             {
@@ -451,7 +479,7 @@ namespace HFCoop
             if (inst != null && !scene && !mod.isDestroyed)
             {
                 // runtime-created item that already exists here: only update its state, do not instantiate again
-                _mLoadState.Invoke(mod, new object[] { Hsm });
+                _mLoadState.Invoke(mod, new object[] { Hsm });   // TryToLoadItemState already runs every per-feature loader (tablecloth, renovation, bowls, coop eggs, bedding...)
             }
             else
             {
@@ -461,6 +489,7 @@ namespace HFCoop
             if (mod.isDestroyed) { CreatedById.Remove(netId); LastJson.Remove(netId); }
             else LastJson[netId] = json;
             RecordInLocalSave(mod, netId);
+            if (!mod.isDestroyed && mod.instance != null) StateSync.OnApplied(mod.instance);
             if (!mod.isDestroyed && mod.instance != null) FinishRemotePlacement(mod.instance);
             return true;
         }

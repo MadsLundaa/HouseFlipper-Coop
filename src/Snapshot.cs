@@ -106,6 +106,12 @@ namespace HFCoop
         {
             Watchdog.Phase("snapshot.send"); var h = Hsm;
             if (h == null || Plugin.SceneName.Length == 0 || h.Recorder == null || h.Recorder.currentRecording == null) { Plugin.Log.LogInfo("[snap] host has no house loaded yet, telling #" + c.PlayerId + " to wait"); c.Send(new W(Msg.NotReady).Done()); return; }
+            string need; if (!DlcGate.ClientCanLoad(c, out need))
+            {
+                Plugin.Log.LogWarning("[snap] #" + c.PlayerId + " (" + c.Name + ") does not own the " + need + " DLC this house needs: not sending it");
+                Session.Status = c.Name + " cannot load this house (needs the " + DlcGate.Pretty(need) + " DLC)";
+                c.Send(new W(Msg.Event).S("dlc").I(Session.MyId).S("blocked").S(need).Done()); return;
+            }
             Recording rec = h.MakeCurrentGameRecording();
             if (rec == null) { Plugin.Log.LogWarning("[snap] host has no recording"); return; }
             ItemSync.AssignLoadedIds(rec); ItemSync.AssignAnonymousIds();
@@ -119,11 +125,13 @@ namespace HFCoop
         // ---- client ----
         static bool _awaiting, _notReady; static double _retryAt;
         public static void Request() { _awaiting = true; _notReady = false; _retryAt = Session.Now + 3.0; Session.SendAll(new W(Msg.SnapshotReq).Done()); Plugin.Log.LogInfo("[snap] requested snapshot"); }
+        /// <summary>Client: the host will not send its house (a DLC is missing): stop asking.</summary>
+        public static void Blocked() { _awaiting = false; _notReady = false; }
         public static void HostNotReady() { _notReady = true; Session.Status = "Waiting for the host to load a house..."; }
 
         public static void Receive(R r)
         {
-            _awaiting = false; _suspended = false;
+            _awaiting = false; _suspended = false; DlcGate.Reset();
             if (Loading)
             {
                 // the host changed house again while we are still loading: remember the newest one and apply it as soon as this load ends
@@ -150,7 +158,7 @@ namespace HFCoop
             _suspended = false; InstSync.MarkOldDoors();
             Ready = false; Events.Applying = true; Loading = true; Tainted = true; _sawLoadStart = false; _loadStart = Session.Now;
             Session.Status = "Loading host's house...";
-            ItemSync.Reset(); RecSync.Reset();
+            ItemSync.Reset(); RecSync.Reset(); PetSync.Reset(); CropSync.Reset(); StateSync.Reset(); DroneSync.Reset(); WeatherSync.Reset();   // everything these remembered belongs to the old house
             if (Plugin.SceneName.Length == 0) LeaveMainMenu(); // joined from the main menu: do what "Continue Game" does before loading
             AllowLoad = true;
             ProgressSync.ApplyOfficeNow(); // the office decides "is this the office" while the house loads (PC registration, buyers outside): it must be the host's by then

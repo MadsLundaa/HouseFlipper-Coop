@@ -39,6 +39,8 @@ namespace HFCoop
         public double LastRecv;
         public double LastPing;
         public bool Handshaken;
+        /// <summary>DLC names the peer reported in its handshake (null = it did not report any).</summary>
+        public System.Collections.Generic.HashSet<string> Dlcs;
         public abstract void Send(byte[] payload);
         public abstract void Close(string reason);
     }
@@ -145,6 +147,7 @@ namespace HFCoop
         readonly BinaryReader _r;
         public readonly byte Type;
         public R(byte[] data) { _r = new BinaryReader(new MemoryStream(data), Encoding.UTF8); Type = _r.ReadByte(); }
+        public bool More { get { return _r.BaseStream.Position < _r.BaseStream.Length; } }
         public byte B() { return _r.ReadByte(); }
         public int I() { return _r.ReadInt32(); }
         public float F() { return _r.ReadSingle(); }

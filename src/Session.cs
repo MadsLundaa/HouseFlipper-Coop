@@ -207,7 +207,7 @@ namespace HFCoop
                 {
                     _hostConn = _connectResult; _connectResult = null; _connecting = false;
                     _hostConn.LastRecv = Now; Role = Role.Client; Status = "Handshaking..."; Events.OnSessionStart();
-                    _hostConn.Send(new W(Msg.Hello).I(Protocol).S(Plugin.GameBuild).S(Plugin.Version).S(Cfg.PlayerName.Value).Done());
+                    _hostConn.Send(new W(Msg.Hello).I(Protocol).S(Plugin.GameBuild).S(Plugin.Version).S(Cfg.PlayerName.Value).S(DlcGate.OwnedCsv()).Done());
                 }
             }
             if (!Active) return;
@@ -354,10 +354,15 @@ namespace HFCoop
 
         static void OnHello(Conn c, R r)
         {
-            int proto = r.I(); string build = r.S(), ver = r.S(), name = r.S();
+            int proto = r.I(); string build = r.S(), ver = r.S(), name = r.S(); string dlcCsv = r.More ? r.S() : null;
             if (proto != Protocol) { Reject(c, "protocol mismatch (host " + Protocol + ", you " + proto + ") - update the mod"); return; }
             if (build != Plugin.GameBuild) { Reject(c, "game version mismatch (host " + Plugin.GameBuild + ", you " + build + ")"); return; }
             if (_conns.FindAll(x => x.Handshaken).Count >= Cfg.MaxPlayers.Value - 1) { Reject(c, "session is full"); return; }
+            if (Cfg.RequireSameDlc.Value && dlcCsv != null)
+            {
+                var lack = DlcGate.Lacking(DlcGate.Owned(), DlcGate.Parse(dlcCsv));
+                if (lack.Count > 0) { Reject(c, "you do not own DLC the host has: " + DlcGate.PrettyList(lack)); return; }
+            }
             // the same player coming back after a network drop: the old connection is dead but may not have timed out yet - replace it right away
             string rk = RemoteKey(c.Remote);
             foreach (var o in _conns.ToArray())
@@ -368,6 +373,8 @@ namespace HFCoop
             w.I(0).S(Cfg.PlayerName.Value);
             foreach (var p in Players.Values) if (p.Id != c.PlayerId) w.I(p.Id).S(p.Name);
             c.Send(w.Done());
+            DlcGate.OnHello(c, dlcCsv);
+            c.Send(new W(Msg.Event).S("dlc").I(MyId).S("host").S(DlcGate.OwnedCsv()).Done());
             var rp = new RemotePlayer { Id = c.PlayerId, Name = c.Name };
             Players[c.PlayerId] = rp;
             BroadcastExcept(c, new W(Msg.PlayerJoined).I(c.PlayerId).S(c.Name).Done());

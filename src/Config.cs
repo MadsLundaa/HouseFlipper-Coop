@@ -8,6 +8,7 @@ namespace HFCoop
         public static ConfigEntry<bool> AutoReconnect;
         public static ConfigEntry<string> PlayerName, JoinAddress;
         public static ConfigEntry<bool> DevCommands, KeepSharedProgress, TemporaryWorkshop; public static ConfigEntry<int> LoadRetrySeconds; public static ConfigEntry<bool> CheckForUpdates;
+        public static ConfigEntry<bool> RequireSameDlc; public static ConfigEntry<string> PretendMissingDlc;
         public static ConfigEntry<bool> AlwaysLitLamps, DiscordPresence, VerboseLog, ShowNameTags, AutoSyncMoney, SteamProbeAuto, SteamForceRelay, SteamHost;
         public static ConfigEntry<string> SteamProbeTarget;
         public static ConfigEntry<int> SteamChunkKB;
@@ -24,6 +25,8 @@ namespace HFCoop
             AutoReconnect = c.Bind("Network", "AutoReconnect", true, "Client: when the connection to the host is lost (not when the host ends the session or you leave), keep the house open and retry the same address.");
             ReconnectSeconds = c.Bind("Network", "ReconnectSeconds", 120, "How long a client keeps trying to reconnect before giving up.");
             MaxPlayers = c.Bind("Network", "MaxPlayers", 4, "Maximum players including the host.");
+            RequireSameDlc = c.Bind("Network", "RequireSameDlc", false, "Host: refuse players who lack a DLC the host owns (default: let them in and only keep them out of houses that need the DLC they lack).");
+            PretendMissingDlc = c.Bind("Debug", "PretendMissingDlc", "", "Testing only: comma-separated DLC names (Farm,Pets,DineOut,LuxuryFlipper,HgtvFlipper,Cyberpunk,PopArt,Party,GardenFlipper,ApocalypseFlipper) this player reports as not owned.");
             VerboseLog = c.Bind("Debug", "VerboseLog", false, "Log every replicated event.");
             KeepSharedProgress = c.Bind("Progress", "KeepSharedProgress", false, "Joiner: keep the shared skills/tools/statistics after leaving (default: restore your own).");
             TemporaryWorkshop = c.Bind("Workshop", "TemporaryDownloads", true, "Joiner: when the host uses Steam Workshop items you do not have, subscribe to them for the length of the session (Steam downloads them) and unsubscribe again when you disconnect. Items you were already subscribed to are never touched. Off: those items are simply missing for you.");

@@ -16,7 +16,7 @@ namespace HFCoop
         {
             _h = new Harmony(Plugin.Guid);
             ItemSync.Patch(_h);
-            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h); RecordingGuard.Patch(_h); RecordingGuard.PatchQuests(_h); RecordingGuard.PatchLoadRaisers(_h); GrassSync.Patch(_h); WeatherSync.Patch(_h); Workshop.Patch(_h);
+            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h); RecordingGuard.Patch(_h); RecordingGuard.PatchQuests(_h); RecordingGuard.PatchLoadRaisers(_h); GrassSync.Patch(_h); WeatherSync.Patch(_h); UfoSync.Patch(_h); Workshop.Patch(_h);
             var save = AccessTools.Method(typeof(HouseSaveManager), "SaveRecordedGame");
             if (save != null) _h.Patch(save, prefix: new HarmonyMethod(typeof(Events), "BlockClientSave"));
             else Plugin.Log.LogWarning("[save] SaveRecordedGame not found - client saves are NOT blocked");
@@ -34,7 +34,7 @@ namespace HFCoop
                 var h = Held.ToArray(); Held.Clear();
                 foreach (var kv in h) { var rr = new R(kv.Value); Handle(kv.Key, rr.Type, rr, kv.Value); }
             }
-            Watchdog.Phase("evt.item"); ItemSync.Tick(); GrassSync.Tick(); PetSync.Tick(); Workshop.Tick(); InstSync.Tick(); MountSync.Tick(); LightSync.Tick(); Watchdog.Phase("evt.rec"); RecSync.Tick(); Watchdog.Phase("evt.money"); MoneySync.Tick(); ProgressSync.Tick(); FollowHost.Tick(); ClockSync.Tick(); DaySync.Tick(); JobSync.Tick(); CarrySync.Tick();
+            Watchdog.Phase("evt.item"); ItemSync.Tick(); GrassSync.Tick(); PetSync.Tick(); StateSync.Tick(); CropSync.Tick(); DroneSync.Tick(); Workshop.Tick(); InstSync.Tick(); MountSync.Tick(); LightSync.Tick(); Watchdog.Phase("evt.rec"); RecSync.Tick(); Watchdog.Phase("evt.money"); MoneySync.Tick(); ProgressSync.Tick(); FollowHost.Tick(); ClockSync.Tick(); DaySync.Tick(); JobSync.Tick(); CarrySync.Tick();
         }
 
         public static void OnSessionStart() { MoneySync.OnSessionStart(); if (Session.Role == Role.Host) ItemSync.AssignAnonymousIds(); }
@@ -62,20 +62,23 @@ namespace HFCoop
             Session.SendAll(new W(Msg.Event).S(kind).I(Session.MyId).S(key).S(json ?? "").Done());
         }
 
+        static bool IsDlcEvent(byte[] raw) { try { var q = new R(raw); return q.Type == Msg.Event && q.S() == "dlc"; } catch { return false; } }
+
         public static void Handle(Conn from, byte type, R r, byte[] raw)
         {
             if (type == Msg.NotReady) { Snapshot.HostNotReady(); return; }
             if (type == Msg.SnapshotReq) { if (Session.Role == Role.Host) Snapshot.SendTo(from); return; }
             if (type == Msg.Snapshot) { if (Session.Role == Role.Client) Snapshot.Receive(r); return; }
             if (type != Msg.Event) return;
-            if (Snapshot.Loading) { Held.Add(new KeyValuePair<Conn, byte[]>(from, raw)); return; } // replay once the house finished loading
+            if (Snapshot.Loading && !IsDlcEvent(raw)) { Held.Add(new KeyValuePair<Conn, byte[]>(from, raw)); return; } // replay once the house finished loading
             string kind = r.S(); int origin = r.I(); string key = r.S(); string json = r.S();
             if (Cfg.VerboseLog.Value) Plugin.Log.LogInfo("[evt] recv " + kind + " from #" + origin + " " + key);
+            if (kind == "dlc") { if (key == "host") DlcGate.OnHostList(json); else if (key == "blocked") { DlcGate.OnBlocked(json); Snapshot.Blocked(); } return; }   // about the session, not the house: never held or dropped
             // A house change is under way: events about the old house must not touch the new one (and the other way round). The host says "changing" at once, the snapshot
             // follows a few seconds later; until then the client ignores events, and the host ignores a client's events until it reports "ready" in the new house.
             if (Session.Role == Role.Client && kind == "house" && key == "changing") { Snapshot.SuspendEvents(); return; }
             if (Session.Role == Role.Client && Snapshot.EventsSuspended && kind != "house") return;
-            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); Interactions.SendStatesTo(from); GrassSync.SendTo(from); WeatherSync.SendTo(from); PetSync.SendTo(from); return; }
+            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); Interactions.SendStatesTo(from); GrassSync.SendTo(from); WeatherSync.SendTo(from); PetSync.SendTo(from); CropSync.SendTo(from); return; }
             if (Session.Role == Role.Host && kind != "house" && FollowHost.IsPending(origin)) return;
             bool ok = false;
             Applying = true;
@@ -100,6 +103,10 @@ namespace HFCoop
                     case "grass": ok = GrassSync.Apply(key, json); break;
                     case "weather": ok = WeatherSync.Apply(key, json); break;
                     case "pet": ok = PetSync.Apply(key, json); break;
+                    case "soil": ok = CropSync.Apply(key, json); break;
+                    case "dlc": if (key == "host") DlcGate.OnHostList(json); else if (key == "blocked") { DlcGate.OnBlocked(json); Snapshot.Blocked(); } ok = true; break;
+                    case "ufo": ok = UfoSync.Apply(key, json); break;
+                    case "drone": ok = DroneSync.Apply(key, json); break;
                     default: Plugin.Log.LogWarning("[evt] unknown event kind " + kind); break;
                 }
             }
