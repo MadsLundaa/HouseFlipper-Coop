@@ -1,17 +1,17 @@
-# House Flipper Co-op: multiplayer mod for House Flipper (prototype 0.6.0)
+# House Flipper Co-op: multiplayer mod for House Flipper (beta 0.7.0)
 
 **House Flipper multiplayer mod.** A BepInEx co-op mod that lets you and your friends renovate **the same house** together in the original **House Flipper (2018, Steam)**: host a game, friends join over the internet or Steam, and everyone cleans, paints, builds and flips together. It also supports Steam Workshop addons.
 
 Download the latest version from the [Releases page](https://github.com/MadsLundaa/HouseFlipper-Coop/releases/latest).
 
-It is a prototype: the core loop works and was tested with two real game instances, but some systems may be untested or not shared.
+It is a beta: it covers the base game and the DLC areas and was tested with two and three players, on one PC and over a real network. Things can still go wrong in ways the tests did not cover, so keep backups and report what you find.
 
 ## What it does
 
 - You see the other players in the house, with name tags and the tool they hold.
 - Furniture, cleaning, painting, floors, demolition, doors/windows and repairs are shared live.
 - Money, skills and job progress are shared. The host's values are authoritative.
-- DLC content is shared too: pets and farm animals, farm soil and crops, farm weather, the UFO event and drone, DineOut tablecloths, Luxury furniture renovation. A player who does not own a DLC is told so and kept out of houses that need it.
+- DLC content is shared too: pets and farm animals (their movement, animations and reactions; any player can pick up, pet and feed them), the chicken coop and eggs, farm soil and crops, farm weather, the leaf blower, the UFO event and drone, DineOut tablecloths and tableware presets, Luxury furniture renovation. A player who does not own a DLC is told so and kept out of houses that need it.
 - Late joiners get the host's current house automatically.
 - Only the host saves the shared house. Joiners work on an in-memory copy.
 
@@ -44,7 +44,7 @@ To uninstall, run `Uninstall.bat`. It removes only what the installer added. Sav
 
 - Always keep backups. The game was not designed for multiplayer.
 - If the host crashes, work since the host's last save is lost. Save before you finish.
-- Tested with game build 1.26252 on Windows, base game and all ten DLCs on two PCs (one of them really missing most DLCs). Not shared or not verified: pet eating/petting animations, DineOut tableware presets, a hen laying an egg by itself, the leaf blower. See `CHANGELOG.md` for what was checked.
+- Tested with game build 1.26252 on Windows, base game and all ten DLCs, with two and three players on one PC and over a real network with a second PC. See `CHANGELOG.md` for what was checked.
 - Steam Workshop addons are supported. When the host uses Workshop items you do not have, the mod subscribes you to them for the session (Steam downloads them before the house loads) and unsubscribes again when you disconnect; addons you already had are never touched. If you place an item from an addon the host does not have, the host refuses it and it is sold back. Tested with furniture and prop addons; addons with their own behaviour are untested. Turn the temporary downloads off with `TemporaryDownloads = false` under `[Workshop]` in `BepInEx\config\dev.hfcoop.cfg`.
 - The player limit is 4, including the host. You can raise it with `MaxPlayers` in `BepInEx\config\dev.hfcoop.cfg`, but there is no promise that anything above 4 players works as intended.
 
