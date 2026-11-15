@@ -158,7 +158,7 @@ namespace HFCoop
             _suspended = false; InstSync.MarkOldDoors();
             Ready = false; Events.Applying = true; Loading = true; Tainted = true; _sawLoadStart = false; _loadStart = Session.Now;
             Session.Status = "Loading host's house...";
-            ItemSync.Reset(); RecSync.Reset(); PetSync.Reset(); CropSync.Reset(); StateSync.Reset(); DroneSync.Reset(); WeatherSync.Reset();   // everything these remembered belongs to the old house
+            ItemSync.Reset(); ItemSync.Quiet(60.0); RecSync.Reset(); PetSync.Reset(); CropSync.Reset(); StateSync.Reset(); DroneSync.Reset(); LeafSync.Reset(); CoopSync.Reset(); WeatherSync.Reset();   // everything these remembered belongs to the old house
             if (Plugin.SceneName.Length == 0) LeaveMainMenu(); // joined from the main menu: do what "Continue Game" does before loading
             AllowLoad = true;
             ProgressSync.ApplyOfficeNow(); // the office decides "is this the office" while the house loads (PC registration, buyers outside): it must be the host's by then
@@ -215,6 +215,7 @@ namespace HFCoop
             RecSync.Prime(); InstSync.Prime(); ProgressSync.OnHouseReady();
             Session.Status = "Connected to " + Session.HostName;
             Plugin.Log.LogInfo("[snap] house loaded from host snapshot");
+            ItemSync.Quiet(15.0);
             Events.Send("house", "ready", ""); // the host now accepts our events again
             if (_queuedSnapshot != null) { var q = _queuedSnapshot; _queuedSnapshot = null; var rr = new R(q); Plugin.Log.LogInfo("[snap] loading the newer snapshot"); Receive(rr); }
         }

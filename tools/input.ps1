@@ -7,5 +7,7 @@ Add-Type -Namespace I -Name W -MemberDefinition '
 $map = @{ 'return' = 0x0D; 'escape' = 0x1B; 'tab' = 0x09; 'space' = 0x20; 'w' = 0x57; 'a' = 0x41; 's' = 0x53; 'd' = 0x44; 'e' = 0x45; 'f4' = 0x73; 'f5' = 0x74; 'f6' = 0x75; 'f7' = 0x76 }
 switch ($Action) {
     'key' { $vk = $map[$Arg.ToLower()]; [I.W]::keybd_event($vk, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds $Ms; [I.W]::keybd_event($vk, 0, 2, [UIntPtr]::Zero) }
+    'vk' { [I.W]::keybd_event([byte]$X, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds $Ms; [I.W]::keybd_event([byte]$X, 0, 2, [UIntPtr]::Zero) }   # raw virtual-key code in -X (0x31 = '1', 0x51 = Q, 0x09 = Tab)
+    'hold' { [I.W]::SetCursorPos($X, $Y); Start-Sleep -Milliseconds 150; [I.W]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds $Ms; [I.W]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) }   # hold the left button for -Ms
     'click' { [I.W]::SetCursorPos($X, $Y); Start-Sleep -Milliseconds 150; [I.W]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80; [I.W]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero) }
 }

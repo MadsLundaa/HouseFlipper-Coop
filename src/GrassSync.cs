@@ -35,10 +35,47 @@ namespace HFCoop
             _sendAt = Time.realtimeSinceStartup + 0.7; // the mask has settled by then
         }
 
+        /// <summary>Send the lawn shortly (after the hoe dug a tile here: the grass under it is gone).</summary>
+        public static void SendSoon() { if (!Session.Active || Events.Applying) return; double at = Time.realtimeSinceStartup + 1.5; if (_sendAt == 0 || _sendAt > at) _sendAt = at; }
+
         public static void DevSend() { _sendAt = Time.realtimeSinceStartup; }
+
+        // A soil tile rebuilt from another player's record (after they sowed it) is deleted first, and deleting a tile grows the grass back on that spot; the rebuilt tile does not cut it again.
+        // The lawn as it was is kept before the delete and put back once the rebuilt tile has loaded.
+        static Color32[] _keepStd, _keepSpec; static int _kw, _kh, _ksw, _ksh; static double _restoreAt, _restoreAgainAt;
+        public static void KeepLawn()
+        {
+            try
+            {
+                if (_keepStd != null || _keepSpec != null) return;   // already holding the lawn from before the first rebuild
+                var area = UnityEngine.Object.FindObjectOfType<MowingArea>(); if (area == null) return;
+                var t = area.GetTexture() as Texture2D; if (t != null) { _keepStd = t.GetPixels32(); _kw = t.width; _kh = t.height; }
+                try { var s = area.GetSpecialTexture() as Texture2D; if (s != null) { _keepSpec = s.GetPixels32(); _ksw = s.width; _ksh = s.height; } } catch { }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[grass] could not keep the lawn: " + e.Message); }
+        }
+        public static void RestoreLawnSoon() { if (_keepStd == null && _keepSpec == null) return; _restoreAt = Time.realtimeSinceStartup + 1.0; _restoreAgainAt = Time.realtimeSinceStartup + 3.0; }
+        static void Put(Color32[] px, int w, int h, bool special, MowingArea area)
+        {
+            if (px == null) return; var t = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            try { t.SetPixels32(px); t.Apply(); if (special) area.SetSpecialTexture(t); else area.SetTexture(t); }
+            finally { UnityEngine.Object.Destroy(t); }
+        }
+        static void Restore(bool last)
+        {
+            try
+            {
+                var area = UnityEngine.Object.FindObjectOfType<MowingArea>();
+                if (area != null) { Put(_keepStd, _kw, _kh, false, area); Put(_keepSpec, _ksw, _ksh, true, area); }
+                if (last) { _keepStd = null; _keepSpec = null; Plugin.Log.LogInfo("[grass] lawn kept across a rebuilt soil tile"); }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[grass] could not put the lawn back: " + e.Message); _keepStd = null; _keepSpec = null; }
+        }
 
         public static void Tick()
         {
+            if (_restoreAt > 0 && Time.realtimeSinceStartup >= _restoreAt) { _restoreAt = 0; Restore(false); }
+            if (_restoreAgainAt > 0 && Time.realtimeSinceStartup >= _restoreAgainAt) { _restoreAgainAt = 0; Restore(true); }
             if (_sendAt > 0 && Time.realtimeSinceStartup >= _sendAt) { _sendAt = 0; var msg = Build(); if (msg != null) Events.Send("grass", "mask", msg); }
         }
 
@@ -96,6 +133,7 @@ namespace HFCoop
             try
             {
                 var area = UnityEngine.Object.FindObjectOfType<MowingArea>(); if (area == null) return false;
+                _keepStd = null; _keepSpec = null; _restoreAt = 0; _restoreAgainAt = 0;   // the other player's lawn is newer than the one kept here
                 var parts = json.Split('|');
                 Load(parts[0], false, area);
                 if (parts.Length > 1) Load(parts[1], true, area);

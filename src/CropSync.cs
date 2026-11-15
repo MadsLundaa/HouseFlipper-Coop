@@ -27,7 +27,7 @@ namespace HFCoop
         static readonly Dictionary<string, string> Json = new Dictionary<string, string>(); // tile -> its record, for a player who joins later
         static readonly JsonSerializerSettings Ser = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore, Formatting = Formatting.None };
 
-        public static void Reset() { NoCropSince.Clear(); Retried.Clear(); Hold.Clear(); Json.Clear(); Sig.Clear(); PendingLoad.Clear(); _init = false; _cm = null; _next = 0; }
+        public static void Reset() { _reconnectAt = 0; Rebuilds.Clear(); NoCropSince.Clear(); Retried.Clear(); Hold.Clear(); Json.Clear(); Sig.Clear(); PendingLoad.Clear(); _init = false; _cm = null; _next = 0; }
 
         static Type T(string n) { foreach (var a in AppDomain.CurrentDomain.GetAssemblies()) { Type t = null; try { t = a.GetType(n, false); } catch { } if (t != null) return t; } return null; }
 
@@ -95,7 +95,7 @@ namespace HFCoop
             {
                 if (c == null) continue; int id = c.GetInstanceID(); seen.Add(id); double first; if (!DupSeen.TryGetValue(id, out first)) { DupSeen[id] = now; continue; }
                 if (now - first < 15.0 || HasCrop(c)) continue;
-                try { _delete.Invoke(c, null); Plugin.Log.LogInfo("[crop] removed a duplicate soil tile"); } catch (Exception e) { Plugin.Log.LogWarning("[crop] could not remove a duplicate tile: " + (e.InnerException ?? e).Message); }
+                try { GrassSync.KeepLawn(); _delete.Invoke(c, null); GrassSync.RestoreLawnSoon(); Reconnect(); Plugin.Log.LogInfo("[crop] removed a duplicate soil tile"); } catch (Exception e) { Plugin.Log.LogWarning("[crop] could not remove a duplicate tile: " + (e.InnerException ?? e).Message); }
             }
             foreach (var id in DupSeen.Keys.ToList()) if (!seen.Contains(id)) DupSeen.Remove(id);
         }
@@ -121,8 +121,77 @@ namespace HFCoop
 
         // A rebuilt tile that is marked seeded but never grew its crop object (seen when this player has a seed item of that crop in the scene): after a while the game's own sowing step
         // (SoilBehaviour.Sow with the seed data of the crop type in the record) is run on it.
+        /// <summary>The game's seed data for a crop type (SeedAdder.SeedDictionary; a crop is listed once this player's game has seen its seed bag). If missing, a loaded seed bag of that crop adds it.</summary>
+        static object SeedData(int want)
+        {
+            var sat = T("Features.Farm.Seeding.Code.SeedAdder"); if (sat == null) return null;
+            var fd = sat.GetField("SeedDictionary", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic); var dict = fd == null ? null : fd.GetValue(null) as IDictionary; if (dict == null) return null;
+            foreach (DictionaryEntry e in dict) if (Convert.ToInt32(e.Key) == want) return e.Value;
+            try
+            {
+                var add = sat.GetMethod("AddSeedToDictionary", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); var tf = sat.GetField("farmCollectibleType", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (add != null && tf != null)
+                    foreach (var o in UnityEngine.Resources.FindObjectsOfTypeAll(sat)) if (Convert.ToInt32(tf.GetValue(o)) == want) { add.Invoke(o, null); break; }
+            }
+            catch { }
+            foreach (DictionaryEntry e in dict) if (Convert.ToInt32(e.Key) == want) return e.Value;
+            return null;
+        }
+
+        /// <summary>The other player sowed a tile that exists here: sow ours with the game's own step instead of rebuilding it (a rebuild grows the grass back for a moment and loses the tile's shape).</summary>
+        static bool SowInPlace(Component local, object ps)
+        {
+            try
+            {
+                if (Seeded(local) || HasCrop(local)) return false;
+                var crop = F(ps, "crop"); var seeded = F(ps, "isSeeded"); if (crop == null || !(seeded is bool) || !(bool)seeded) return false;
+                if (Convert.ToInt32(F(ps, "soilLevel")) != Convert.ToInt32(F(local, "currentSoilLevel"))) return false;
+                var data = SeedData(Convert.ToInt32(F(crop, "cropType"))); if (data == null) return false;
+                var sow = _soilT.GetMethod("Sow", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); if (sow == null) return false;
+                ((MonoBehaviour)local).StartCoroutine((IEnumerator)sow.Invoke(local, new object[] { 0.1f, data }));
+                return true;
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[crop] could not sow in place: " + (e.InnerException ?? e).Message); return false; }
+        }
+
         static readonly Dictionary<int, double> NoCropSince = new Dictionary<int, double>();
         static readonly HashSet<int> Retried = new HashSet<int>();
+        static readonly Dictionary<string, int> Rebuilds = new Dictionary<string, int>();
+
+        // Tiles built from another player's records (or a neighbour removed) do not reshape the tiles around them, so a row hoed on one side showed single plots with stone edges on the other.
+        // After a rebuild every tile looks at its neighbours again and re-aligns (the game's own LookForNeighbours and Align, what placing a tile with the hoe does).
+        static double _reconnectAt; static bool _reconnectAgain;
+        static void Reconnect() { _reconnectAt = Time.realtimeSinceStartup + 1.0; _reconnectAgain = true; }
+        static MethodInfo _look, _align, _appear;
+        static void ConnectAll()
+        {
+            try
+            {
+                if (_look == null) _look = _soilT.GetMethod("LookForNeighbours", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (_align == null) _align = _soilT.GetMethod("Align", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (_appear == null) _appear = _soilT.GetMethod("SetAppearance", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (_look == null || _align == null) return;
+                var tiles = Scan(true); var grid = Soils(); int fixedGrid = 0;
+                if (grid != null)
+                {
+                    // the neighbour lookup reads the game's soil grid; tiles built from records were not always in it, so their neighbours took them for empty ground
+                    var keyT = _dictF.FieldType.IsGenericType ? _dictF.FieldType.GetGenericArguments()[0] : null;
+                    foreach (var k in grid.Keys.Cast<object>().ToList()) { var v = grid[k] as UnityEngine.Object; if (v == null) { grid.Remove(k); fixedGrid++; } }
+                    if (keyT != null)
+                        foreach (var kv in tiles)
+                        {
+                            var xz = kv.Key.Split(':'); var gk = Activator.CreateInstance(keyT, int.Parse(xz[0]), int.Parse(xz[1]));
+                            if (!grid.Contains(gk) || !ReferenceEquals(grid[gk], kv.Value)) { grid[gk] = kv.Value; fixedGrid++; }
+                        }
+                }
+                int n = 0;
+                foreach (var kv in tiles) { try { _look.Invoke(kv.Value, null); n++; } catch { } }
+                foreach (var kv in tiles) { try { _align.Invoke(kv.Value, null); if (_appear != null) _appear.Invoke(kv.Value, null); } catch { } }
+                if (fixedGrid > 0) Plugin.Log.LogInfo("[crop] soil grid: " + fixedGrid + " entr(ies) fixed");
+                if (n > 0) Plugin.Log.LogInfo("[crop] " + n + " soil tile(s) joined to their neighbours again");
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[crop] could not join the tiles: " + (e.InnerException ?? e).Message); }
+        }
         static void EnsureCrops(Dictionary<string, Component> tiles)
         {
             var now = Time.realtimeSinceStartup; var seen = new HashSet<int>();
@@ -136,11 +205,15 @@ namespace HFCoop
                     string js; if (!Json.TryGetValue(kv.Key, out js)) continue;
                     var jo = Newtonsoft.Json.Linq.JObject.Parse(js); var cropTok = jo["crop"]; if (cropTok == null || cropTok.Type == Newtonsoft.Json.Linq.JTokenType.Null) continue;
                     int want = (int)cropTok["cropType"];
-                    var sat = T("Features.Farm.Seeding.Code.SeedAdder"); var fd = sat == null ? null : sat.GetField("SeedDictionary", BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (fd == null) continue;
-                    var dict = fd.GetValue(fd.IsStatic ? null : (object)UnityEngine.Resources.FindObjectsOfTypeAll(sat).FirstOrDefault()) as IDictionary; if (dict == null) continue;
-                    object data = null; foreach (DictionaryEntry e in dict) if (Convert.ToInt32(e.Key) == want) { data = e.Value; break; }
-                    if (data == null) { Plugin.Log.LogInfo("[crop] tile " + kv.Key + " has no crop and this game has no seed data for crop " + want); continue; }
+                    object data = SeedData(want);
+                    if (data == null)
+                    {
+                        // the game only knows a crop's seed data after this player has held that seed: rebuild the tile from the record instead (its load path brings the crop)
+                        int n; Rebuilds.TryGetValue(kv.Key, out n); if (n >= 3) continue; Rebuilds[kv.Key] = n + 1;
+                        GrassSync.KeepLawn(); _delete.Invoke(c, null); PendingLoad.Add(js); Hold[kv.Key] = now + 10.0;
+                        Plugin.Log.LogInfo("[crop] tile " + kv.Key + " has no crop (no seed data for crop " + want + " here): rebuilt from its record");
+                        continue;
+                    }
                     var sow = _soilT.GetMethod("Sow", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     ((MonoBehaviour)c).StartCoroutine((IEnumerator)sow.Invoke(c, new object[] { 0.1f, data }));
                     Plugin.Log.LogInfo("[crop] grew the missing crop on tile " + kv.Key + " with the game's own sowing step");
@@ -159,7 +232,8 @@ namespace HFCoop
                 if (Time.realtimeSinceStartup > _dbgAt) { _dbgAt = Time.realtimeSinceStartup + 15; Plugin.Log.LogInfo("[crop] tick: init=" + _init + " cm=" + (_cm != null) + " soilObjects=" + (_soilT == null ? -1 : UnityEngine.Object.FindObjectsOfType(_soilT).Length) + " known=" + Sig.Count); }
                 if (!Resolve()) return;
                 Soils(); if (_cm == null) { if (_dbgNoCm++ == 0) Plugin.Log.LogInfo("[crop] no CropManager here"); return; }
-                if (PendingLoad.Count > 0) { var batch = PendingLoad.ToList(); PendingLoad.Clear(); Load(batch); return; }
+                if (PendingLoad.Count > 0) { var batch = PendingLoad.ToList(); PendingLoad.Clear(); Load(batch); GrassSync.RestoreLawnSoon(); Reconnect(); return; }
+                if (_reconnectAt > 0 && Time.realtimeSinceStartup >= _reconnectAt) { _reconnectAt = _reconnectAgain ? Time.realtimeSinceStartup + 2.0 : 0; _reconnectAgain = false; ConnectAll(); }
                 var cur = new Dictionary<string, KeyValuePair<string, object>>();
                 var present = new HashSet<string>();
                 foreach (var kv in Scan(true))
@@ -175,6 +249,7 @@ namespace HFCoop
                 {
                     double until; if (Hold.TryGetValue(kv.Key, out until)) { if (Time.realtimeSinceStartup < until) continue; Hold.Remove(kv.Key); Sig[kv.Key] = kv.Value.Key; continue; }
                     string old; if (Sig.TryGetValue(kv.Key, out old) && old == kv.Value.Key) continue;
+                    if (old == null) GrassSync.SendSoon();   // a tile dug here: the hoe also cut the grass under it, and the lawn only travels when it is sent
                     Sig[kv.Key] = kv.Value.Key;
                     string js = JsonConvert.SerializeObject(kv.Value.Value, Ser); Json[kv.Key] = js;
                     Events.Send("soil", kv.Key, js);
@@ -213,14 +288,15 @@ namespace HFCoop
                 var parts = key.Split(':'); if (parts.Length != 2) return false;
                 int x = int.Parse(parts[0], CultureInfo.InvariantCulture), z = int.Parse(parts[1], CultureInfo.InvariantCulture);
                 Component local; Scan(false).TryGetValue(x + ":" + z, out local);
-                if (json == "-") { Sig.Remove(key); Json.Remove(key); if (local != null) _delete.Invoke(local, null); return true; }
+                if (json == "-") { Sig.Remove(key); Json.Remove(key); if (local != null) { _delete.Invoke(local, null); Reconnect(); } return true; }
                 var ps = JsonConvert.DeserializeObject(json, _psT); if (ps == null) return false;
                 Sig[key] = SigOf(ps); Json[key] = json; Hold[key] = Time.realtimeSinceStartup + 10.0;
                 if (local != null)
                 {
                     object cur; try { string ck; cur = SaveRecord(local, out ck); } catch { cur = null; }
                     if (cur != null && SigOf(cur) == Sig[key]) return true;
-                    _delete.Invoke(local, null); PendingLoad.Add(json);  // rebuild once the old tile is gone
+                    if (SowInPlace(local, ps)) { Plugin.Log.LogInfo("[crop] tile " + key + " sown in place like the other player's"); return true; }
+                    GrassSync.KeepLawn(); _delete.Invoke(local, null); PendingLoad.Add(json);  // rebuild once the old tile is gone (the lawn is put back afterwards)
                 }
                 else PendingLoad.Add(json);
                 return true;

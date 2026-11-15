@@ -19,15 +19,60 @@ namespace HFCoop
     {
         static readonly Dictionary<string, Pet> Known = new Dictionary<string, Pet>();   // host: pets already announced; client: pets created from the host's announcements
         static readonly JsonSerializerSettings Ser = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore, Formatting = Formatting.None };
-        static double _next, _nextPos;
+        static double _next, _nextPos; static int _traced;
 
-        public static void Reset() { Known.Clear(); Last.Clear(); HostKeys.Clear(); _next = 0; _settledAt = 0; _leftDone = false; }
+        public static void Reset() { PetMotion.Reset(); Known.Clear(); Last.Clear(); HostPose.Clear(); PendingAdds.Clear(); HostKeys.Clear(); _next = 0; _settledAt = 0; _leftDone = false; }
 
         // a pet is told apart by its save guid (the numeric id is 0 for the first pet and was shared by pets spawned together); without a guid the id is used
         static string KeyOfSave(PetSave s) { return s == null ? null : (!string.IsNullOrEmpty(s.guid) ? "g" + s.guid : "i" + s.id.ToString(CultureInfo.InvariantCulture)); }
+        static string KeyOfPayload(string json) { try { var s = JsonConvert.DeserializeObject<PetSave>(json.Substring(json.IndexOf('|') + 1)); return KeyOfSave(s); } catch { return null; } }
+
         static string KeyOf(Pet p)
         {
             try { return KeyOfSave(p.PetToSave()); } catch { return null; }
+        }
+
+        // the same pet as the host's: same key and the same animal (pets without a save guid are keyed by their number, and the client's own pet number 1 is not the host's pet number 1)
+        static bool SameAnimal(Pet p, PetSave host)
+        {
+            try { var s = p.PetToSave(); return s != null && KeyOfSave(s) == KeyOfSave(host) && s.type == host.type && s.breedID == host.breedID && s.name == host.name; } catch { return false; }
+        }
+
+        // A pet announced while this player's house is still loading was made before the walking mesh existed: the game stopped halfway and left a pet with no animation. Such announcements wait
+        // until the house has settled; a creation that throws removes what it left behind and is tried again a few times.
+        static readonly List<KeyValuePair<string, int>> PendingAdds = new List<KeyValuePair<string, int>>();
+        static double _pendingAt;
+        static bool Ready() { return ItemSync.Settled() && UnityEngine.AI.NavMesh.CalculateTriangulation().vertices.Length > 0; }
+        static void PendingTick()
+        {
+            if (PendingAdds.Count == 0 || Time.realtimeSinceStartup < _pendingAt) return;
+            _pendingAt = Time.realtimeSinceStartup + 1.0;
+            if (!Ready()) return;
+            var batch = PendingAdds.ToList(); PendingAdds.Clear();
+            foreach (var kv in batch) Create(kv.Key, kv.Value);
+        }
+
+        static void Create(string json, int attempt)
+        {
+            int bar = json.IndexOf('|'); string pk = json.Substring(0, bar);
+            var save = JsonConvert.DeserializeObject<PetSave>(json.Substring(bar + 1)); if (save == null) return;
+            Pet existing; if (Known.TryGetValue(pk, out existing) && existing != null) return;
+            foreach (var p in UnityEngine.Object.FindObjectsOfType<Pet>()) if (p != null && !Known.ContainsValue(p) && SameAnimal(p, save)) { Known[pk] = p; return; } // the game already made it (its own save)
+            var pm = UnityEngine.Object.FindObjectOfType<PetsManager>(); if (pm == null) { PendingAdds.Add(new KeyValuePair<string, int>(json, attempt)); return; }
+            var before = new HashSet<Pet>(UnityEngine.Object.FindObjectsOfType<Pet>());
+            try
+            {
+                save.usePositionFromSave = true; save.spawnOnLastPosition = true;
+                var pet = pm.LoadPetFromSave(save);
+                if (pet != null) { Known[pk] = pet; Plugin.Log.LogInfo("[pet] created pet " + pk + " " + save.name + " (" + save.type + ") from the host"); }
+                else Plugin.Log.LogWarning("[pet] the game would not create pet " + pk);
+            }
+            catch (Exception e)
+            {
+                foreach (var p in UnityEngine.Object.FindObjectsOfType<Pet>()) if (p != null && !before.Contains(p) && !Known.ContainsValue(p)) UnityEngine.Object.Destroy(p.gameObject);
+                if (attempt < 5) { PendingAdds.Add(new KeyValuePair<string, int>(json, attempt + 1)); _pendingAt = Time.realtimeSinceStartup + 3.0; }
+                Plugin.Log.LogWarning("[pet] creating pet " + pk + " failed (attempt " + (attempt + 1) + "), " + (attempt < 5 ? "trying again" : "giving up") + ": " + (e.InnerException ?? e).Message);
+            }
         }
         static readonly Dictionary<Pet, string> HostKeys = new Dictionary<Pet, string>();   // host: the key given to each pet when it was first seen (kept stable, made unique when two pets would share one)
         static string HostKey(Pet p)
@@ -90,6 +135,10 @@ namespace HFCoop
                 foreach (var p in UnityEngine.Object.FindObjectsOfType<Pet>())
                 {
                     if (p == null || Known.ContainsValue(p)) continue;
+                    // only pets from this player's own profile: a house's own animals (the farm's chickens and cows) have no pet id and belong to the house
+                    PetSave ps = null; try { ps = p.PetToSave(); } catch { }
+                    if (ps == null || ps.id < 0 || !ps.ownedByPlayer) continue;
+                    var k = KeyOfSave(ps); if (PendingAdds.Any(x => x.Key.Contains("|") && KeyOfPayload(x.Key) == k)) continue;   // the host's copy of it is still on its way
                     Plugin.Log.LogInfo("[pet] removing " + p.name + ": a pet from this player's own save that the host does not have");
                     UnityEngine.Object.Destroy(p.gameObject);
                 }
@@ -100,6 +149,13 @@ namespace HFCoop
         public static void Tick()
         {
             LeftoverTick();
+            if (Session.Active && Session.Role == Role.Client) PendingTick();
+            if (Session.Active && ItemSync.Settled())
+            {
+                PetMotion.FollowTick();
+                var shared = new Dictionary<string, Pet>(); foreach (var kv in Known) if (kv.Value != null && kv.Value.gameObject.activeInHierarchy) shared[kv.Key] = kv.Value;
+                PetMotion.ClaimTick(shared); PetMotion.SendTick(shared);   // ten times a second, for the pets this game runs
+            }
             StatTick();
             if (!Session.Active || Session.Role != Role.Host || !ItemSync.Settled()) return;
             if (Time.realtimeSinceStartup < _next) return;
@@ -118,7 +174,7 @@ namespace HFCoop
                 foreach (var gone in HostKeys.Keys.Where(x => x == null).ToList()) HostKeys.Remove(gone);
                 if (Time.realtimeSinceStartup >= _nextPos && live.Count > 0)
                 {
-                    _nextPos = Time.realtimeSinceStartup + 0.5;
+                    _nextPos = Time.realtimeSinceStartup + 3.0;   // the 10-per-second motion stream (PetMotion) carries the positions; this one is only for pets that do not follow it yet
                     var sb = new StringBuilder();
                     foreach (var kv in live) { var t = kv.Value.transform; sb.Append(kv.Key).Append(',').Append(t.position.x.ToString("0.###", CultureInfo.InvariantCulture)).Append(',').Append(t.position.y.ToString("0.###", CultureInfo.InvariantCulture)).Append(',').Append(t.position.z.ToString("0.###", CultureInfo.InvariantCulture)).Append(',').Append(t.eulerAngles.y.ToString("0", CultureInfo.InvariantCulture)).Append(';'); }
                     Events.Send("pet", "pos", sb.ToString());
@@ -149,6 +205,13 @@ namespace HFCoop
             }
         }
 
+        /// <summary>The key this pet has in the shared pet list (null when it is not shared).</summary>
+        /// <summary>The last position and heading the host reported for each pet (used to hold hens on their nests).</summary>
+        public static readonly Dictionary<Pet, KeyValuePair<Vector3, float>> HostPose = new Dictionary<Pet, KeyValuePair<Vector3, float>>();
+
+        public static string KeyForPet(Pet p) { foreach (var kv in Known) if (kv.Value == p) return kv.Key; return null; }
+        public static Pet PetByKey(string key) { Pet p; return Known.TryGetValue(key, out p) && p != null ? p : null; }
+
         public static bool Apply(string key, string json)
         {
             try
@@ -156,15 +219,9 @@ namespace HFCoop
                 if (key == "add")
                 {
                     int bar = json.IndexOf('|'); if (bar < 0) return false; string pk = json.Substring(0, bar);
-                    var save = JsonConvert.DeserializeObject<PetSave>(json.Substring(bar + 1)); if (save == null) return false;
-                    Pet existing; if (Known.TryGetValue(pk, out existing) && existing != null) return true;
-                    string own = KeyOfSave(save);
-                    foreach (var p in UnityEngine.Object.FindObjectsOfType<Pet>()) if (p != null && !Known.ContainsValue(p) && KeyOf(p) == own) { Known[pk] = p; return true; } // the game already made it (its own save)
-                    var pm = UnityEngine.Object.FindObjectOfType<PetsManager>(); if (pm == null) return false;
-                    save.usePositionFromSave = true; save.spawnOnLastPosition = true;
-                    var pet = pm.LoadPetFromSave(save);
-                    if (pet != null) { Known[pk] = pet; Plugin.Log.LogInfo("[pet] created pet " + pk + " " + save.name + " from the host"); }
-                    else Plugin.Log.LogWarning("[pet] the game would not create pet " + pk);
+                    PendingAdds.RemoveAll(x => x.Key.StartsWith(pk + "|"));
+                    if (!Ready()) { PendingAdds.Add(new KeyValuePair<string, int>(json, 0)); return true; }   // made once the house has settled
+                    Create(json, 0);
                     return true;
                 }
                 if (key == "rem")
@@ -172,6 +229,9 @@ namespace HFCoop
                     string id = json; Pet p; if (Known.TryGetValue(id, out p)) { Known.Remove(id); if (p != null) UnityEngine.Object.Destroy(p.gameObject); }
                     return true;
                 }
+                if (key == "anim") return PetAnimSync.Apply(json);
+                if (key == "mo") return PetMotion.Apply(json);
+                if (key == "claim" || key == "release" || key == "own") return PetMotion.Ownership(key, json);
                 if (key == "stat")
                 {
                     var f = json.Split(','); if (f.Length < 1 + StatNames.Length) return false;
@@ -192,15 +252,17 @@ namespace HFCoop
                         var f = rec.Split(','); if (f.Length < 5) continue;
                         Pet p; if (!Known.TryGetValue(f[0], out p) || p == null) continue;
                         var target = new Vector3(float.Parse(f[1], CultureInfo.InvariantCulture), float.Parse(f[2], CultureInfo.InvariantCulture), float.Parse(f[3], CultureInfo.InvariantCulture));
-                        if ((p.transform.position - target).magnitude < 0.75f) continue;
+                        HostPose[p] = new KeyValuePair<Vector3, float>(target, float.Parse(f[4], CultureInfo.InvariantCulture));
+                        if (PetMotion.IsDriven(p) || PetMotion.OwnedHere(p)) continue;   // follows a motion stream, or this game runs it
+                        if ((p.transform.position - target).magnitude < (CoopSync.IsNested(p) ? 0.08f : 0.75f)) continue;   // a hen on a nest is held where the host has it
                         var agent = p.GetComponent<UnityEngine.AI.NavMeshAgent>();
-                        if (agent != null && agent.enabled && agent.isOnNavMesh) agent.Warp(target); else p.transform.position = target;
+                        if (agent != null && agent.enabled && agent.isOnNavMesh && !CoopSync.IsNested(p)) agent.Warp(target); else p.transform.position = target;   // a nest is above the walking mesh: no warp there
                         p.transform.rotation = Quaternion.Euler(0, float.Parse(f[4], CultureInfo.InvariantCulture), 0);
                     }
                     return true;
                 }
             }
-            catch (Exception e) { Plugin.Log.LogWarning("[pet] could not apply " + key + ": " + e.Message); return false; }
+            catch (Exception e) { Plugin.Log.LogWarning("[pet] could not apply " + key + ": " + e.Message + (_traced++ < 2 ? " | " + e : "")); return false; }
             return false;
         }
     }

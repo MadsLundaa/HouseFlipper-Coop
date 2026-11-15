@@ -55,10 +55,23 @@ namespace HFCoop
         public static void RegisterCreated(string id, Item it) { CreatedById[id] = it; CreatedId[it] = id; }
         public static void QueuePublic(Item it) { Queue(it); }
         /// <summary>The host loaded another house: what was pending or remembered belongs to the old one.</summary>
-        public static void OnHouseChanged() { StateSync.Reset(); Pending.Clear(); PendingDeleted.Clear(); LastJson.Clear(); Seen.Clear(); _sceneWatched = false; }
+        public static void OnHouseChanged() { Quiet(15.0); StateSync.Reset(); Pending.Clear(); PendingDeleted.Clear(); LastJson.Clear(); Seen.Clear(); _sceneWatched = false; }
 
         // every item of the house that has a scene guid is watched for disappearing, not only the ones that were sent or received: a job item sold by a path the sold-event hook
         // does not see (bulk sales, the furniture-removal jobs) was only ever noticed when it had been touched before, so some sales never reached the other player
+        // Animals carry an Item (their pick-up part) but are shared by the pet sync. Treating them as items let a player's game remove its own copy of a house's animals,
+        // report them as gone, and the host then deleted its animals and recorded them as destroyed in the house save (the farm lost its chickens and cows for good).
+        // The same goes for the farm's collectable resources (eggs on the nests): they travel with the coop state, and a duplicate egg removed by the coop sync was reported
+        // as gone, so the host deleted its real egg and recorded it as destroyed in the house save.
+        static Type _resT; static bool _resResolved;
+        public static bool IsAnimal(Item it)
+        {
+            if (it == null) return false;
+            if (it.GetComponentInParent<FrozenWay.HouseFlipper.Pets.Pet>() != null || it.GetComponentInChildren<FrozenWay.HouseFlipper.Pets.Pet>(true) != null) return true;
+            if (!_resResolved) { _resResolved = true; _resT = typeof(FrozenWay.HouseFlipper.Pets.Pet).Assembly.GetType("FrozenWay.HouseFlipper.Farm.Animals.CollectableResource", false); }
+            return _resT != null && it.GetComponentInParent(_resT) != null;
+        }
+
         static bool _sceneWatched;
         static void WatchSceneItems()
         {
@@ -67,7 +80,7 @@ namespace HFCoop
                 int n = 0;
                 foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
                 {
-                    if (it == null || !it.gameObject.scene.IsValid() || !it.gameObject.activeInHierarchy) continue;
+                    if (it == null || !it.gameObject.scene.IsValid() || !it.gameObject.activeInHierarchy || IsAnimal(it)) continue;
                     string g = GuidOf(it); if (string.IsNullOrEmpty(g)) continue;
                     string id = "s:" + g; if (!Seen.ContainsKey(id)) { Seen[id] = it; n++; }
                 }
@@ -84,7 +97,7 @@ namespace HFCoop
         {
             if (it == null || it.itemData == null) return false;
             if (NetId(it, false) != null) return true;
-            if (string.IsNullOrEmpty(it.itemData.prefabGuid)) return false;
+            if (string.IsNullOrEmpty(it.itemData.prefabGuid) || IsAnimal(it)) return false;
             var id = PositionId(it); CreatedId[it] = id; CreatedById[id] = it; return true;
         }
 
@@ -100,6 +113,19 @@ namespace HFCoop
                 if (force || !LastJson.ContainsKey(id)) LastJson[id] = JsonConvert.SerializeObject(mod, Ser);
             }
             catch (Exception e) { Plugin.Log.LogWarning("[state] baseline failed: " + e.Message); }
+        }
+
+        /// <summary>Host: give one client the item's current saved state (used for the stateful items, whose state is only sent when it changes: a player who joins later would otherwise keep the default).</summary>
+        public static void SendStateTo(Item it, Conn c)
+        {
+            try
+            {
+                var id = NetId(it, false); if (id == null || it.itemData == null) return;
+                var mod = new ItemModification { instance = it, sceneGuid = id.StartsWith("s:") ? id.Substring(2) : null, prefabGuid = it.itemData.prefabGuid, currentItemState = it.currentItemState };
+                _mPreSave.Invoke(mod, new object[] { Hsm });
+                c.Send(new W(Msg.Event).S("item").I(Session.MyId).S(id).S(JsonConvert.SerializeObject(mod, Ser)).Done());
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[state] could not send " + it.name + ": " + e.Message); }
         }
 
         public static void EnsureSent(Item it)
@@ -148,7 +174,7 @@ namespace HFCoop
                 var groups = new Dictionary<string, List<Item>>();
                 foreach (var it in Resources.FindObjectsOfTypeAll<Item>())
                 {
-                    if (it == null || !it.gameObject.scene.IsValid() || !it.gameObject.activeInHierarchy || it.itemData == null) continue;
+                    if (it == null || !it.gameObject.scene.IsValid() || !it.gameObject.activeInHierarchy || it.itemData == null || IsAnimal(it)) continue;
                     if (CreatedId.ContainsKey(it) || !string.IsNullOrEmpty(GuidOf(it))) continue;
                     string pg = it.itemData.prefabGuid; if (string.IsNullOrEmpty(pg)) continue;
                     var p = it.transform.position;
@@ -337,7 +363,7 @@ namespace HFCoop
             Plugin.Log.LogInfo("[item] imported " + n + " created-item ids");
         }
 
-        public static void Reset() { _sceneWatched = false; Seen.Clear(); CreatedId.Clear(); CreatedById.Clear(); LastJson.Clear(); Pending.Clear(); PendingDeleted.Clear(); }
+        public static void Reset() { Checked.Clear(); _sceneWatched = false; Seen.Clear(); CreatedId.Clear(); CreatedById.Clear(); LastJson.Clear(); Pending.Clear(); PendingDeleted.Clear(); }
 
         // ---------- hooks ----------
         public static void Patch(Harmony h)
@@ -389,7 +415,12 @@ namespace HFCoop
         // ---------- an item that vanished without going through the sale event ----------
         // Selling goes through the recorder's sold/disposed event, which tells the others. Some sales do not (a door or window that was installed during the session is sold
         // through its wall-installation path), so the seller saw the item gone and nobody else did. Every item we track is therefore also watched for disappearing.
-        static object _scanRec; static double _scanNext;
+        static object _scanRec; static double _scanNext, _quietUntil;
+        static readonly HashSet<Item> Checked = new HashSet<Item>();
+        // After a house load the old house's objects are cleaned up for a while (and a player's game that has just loaded the host's house drops some of its own runtime
+        // objects): those are not sales. During this window a vanished item is forgotten without telling the others; before, the others deleted their item with the same id,
+        // and an id is built from the position, so an item standing on the same spot in the new house could be deleted (the host recorded those as destroyed in its save).
+        public static void Quiet(double seconds) { double u = Time.realtimeSinceStartup + seconds; if (u > _quietUntil) _quietUntil = u; }
         static void ScanDestroyed()
         {
             if (Time.realtimeSinceStartup < _scanNext) return; _scanNext = Time.realtimeSinceStartup + 0.5f;
@@ -398,6 +429,9 @@ namespace HFCoop
             bool loading = Snapshot.Loading || h == null || h.isWaitingForApplyingSave;
             var gone = new List<string>(); var goneItems = new List<Item>();
             foreach (var kv in CreatedById) if (kv.Value == null) { gone.Add(kv.Key); goneItems.Add(kv.Value); }
+            List<string> notItems = null;
+            foreach (var kv in CreatedById) { if (kv.Value == null || !Checked.Add(kv.Value)) continue; if (IsAnimal(kv.Value)) (notItems ?? (notItems = new List<string>())).Add(kv.Key); }   // each item checked once
+            if (notItems != null) foreach (var k in notItems) { var it = CreatedById[k]; CreatedById.Remove(k); CreatedId.Remove(it); }
             foreach (var kv in Seen) if (kv.Value == null) { gone.Add(kv.Key); goneItems.Add(null); }
             if (gone.Count == 0 || loading) return; // items vanish by the hundred while a house loads: that is not a sale
             for (int i = 0; i < gone.Count; i++)
@@ -405,6 +439,7 @@ namespace HFCoop
                 string id = gone[i];
                 CreatedById.Remove(id); Seen.Remove(id); LastJson.Remove(id); if (goneItems[i] != null) CreatedId.Remove(goneItems[i]);
                 if (changedHouse) continue;                       // the house was replaced: old items are simply gone
+                if (Time.realtimeSinceStartup < _quietUntil) { Plugin.Log.LogInfo("[item] " + id + " vanished right after a house load: not a sale, not sent"); continue; }
                 Plugin.Log.LogInfo("[item] " + id + " disappeared without a sale event: telling the others");
                 Events.Send("item", id, "{\"isDestroyed\":true}");
             }
@@ -428,7 +463,7 @@ namespace HFCoop
             var list = new List<Item>(Pending); Pending.Clear();
             foreach (var it in list)
             {
-                if (it == null || it.itemData == null) continue;
+                if (it == null || it.itemData == null || IsAnimal(it)) continue;   // animals travel with the pet sync
                 try
                 {
                     var id = NetId(it, true);
@@ -469,6 +504,7 @@ namespace HFCoop
                 if (!mod.isDestroyed) Plugin.Log.LogWarning("[item] unknown scene item " + netId);
                 return false;
             }
+            if (inst != null && IsAnimal(inst)) { Plugin.Log.LogInfo("[item] ignored an item change for " + inst.name + ": animals and eggs are shared by the pet and coop sync"); return true; }
             mod.instance = inst;
             if (scene && inst != null && !mod.isDestroyed) Seen[netId] = inst;
             if (mod.isDestroyed) Seen.Remove(netId);

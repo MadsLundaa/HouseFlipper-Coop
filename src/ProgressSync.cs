@@ -20,7 +20,21 @@ namespace HFCoop
     /// </summary>
     internal static class ProgressSync
     {
-        static readonly string[] Members = { "skills", "statistics", "avaialbleTools", "ordersProgress", "coursesProgress", "toolsUsedInUnlockingToolQuest" };
+        // DineOut tableware presets (a library kept in the player's progress) are shared like the rest: a preset one player saves can be loaded by the others
+        static double _presetDbg;
+        static string PresetsMember;   // name of the PlayerProgress field that holds the tableware presets (a list of objects: it travels as one value, see Flatten/Diff)
+        static readonly string[] Members = BuildMembers();
+        static string[] BuildMembers()
+        {
+            var l = new List<string> { "skills", "statistics", "avaialbleTools", "ordersProgress", "coursesProgress", "toolsUsedInUnlockingToolQuest" };
+            try
+            {
+                foreach (var f in typeof(PlayerProgress).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (f.FieldType == typeof(List<HF.DineOut.Tableware.TablewarePreset>)) { l.Add(f.Name); PresetsMember = f.Name; break; }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[progress] tableware presets not shared: " + e.Message); }
+            return l.ToArray();
+        }
         static readonly JsonSerializer Js = JsonSerializer.Create(new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore });
         static readonly Dictionary<string, JToken> Base = new Dictionary<string, JToken>();
         static bool _primed; static double _next;
@@ -134,6 +148,7 @@ namespace HFCoop
             if (type.IsEnum) return t.Type == JTokenType.String ? Enum.Parse(type, t.Value<string>()) : Enum.ToObject(type, t.Value<long>());
             var u = Nullable.GetUnderlyingType(type) ?? type;
             if (u == typeof(string)) return t.Value<string>();
+            if (!u.IsPrimitive && u != typeof(decimal) && u != typeof(DateTime)) return t.ToObject(u, Js);   // a record (e.g. a tableware preset), not a number
             return System.Convert.ChangeType(t.ToObject<object>(), u, CultureInfo.InvariantCulture);
         }
 
@@ -181,7 +196,9 @@ namespace HFCoop
             else if (kind == "or") { if (v.Value<bool>()) fi.SetValue(owner, true); }
             else if (kind == "union" || (kind == "set" && v is JArray))
             {
-                var coll = fi.GetValue(owner); if (coll == null) return;
+                var coll = fi.GetValue(owner);
+                if (coll == null && ft.IsGenericType && ft.GetGenericTypeDefinition() == typeof(List<>)) { coll = Activator.CreateInstance(ft); fi.SetValue(owner, coll); }   // a library this player never used has no list yet
+                if (coll == null) return;
                 var et = ft.IsGenericType ? ft.GetGenericArguments()[0] : typeof(object);
                 var list = coll as IList;
                 if (list == null) // HashSet<T> (e.g. toolsUsedInUnlockingToolQuest): same operations through reflection
@@ -380,7 +397,20 @@ namespace HFCoop
             var all = new JArray();
             foreach (var kv in cur.Properties())
             {
-                JToken before; if (!Base.TryGetValue(kv.Name, out before)) { Base[kv.Name] = kv.Value; continue; }
+                JToken before;
+                if (!Base.TryGetValue(kv.Name, out before))
+                {
+                    // a member that did not exist when the baseline was taken (the preset library is created with the first saved preset)
+                    if (kv.Name == PresetsMember && kv.Value is JArray && ((JArray)kv.Value).Count > 0) { all.Add(new JObject { { "p", kv.Name }, { "o", "set" }, { "v", kv.Value } }); Plugin.Log.LogInfo("[prog] tableware presets appeared here: " + ((JArray)kv.Value).Count); }
+                    Base[kv.Name] = kv.Value; continue;
+                }
+                if (kv.Name == PresetsMember && Cfg.VerboseLog.Value && Time.realtimeSinceStartup > _presetDbg) { _presetDbg = Time.realtimeSinceStartup + 10; Plugin.Log.LogInfo("[prog] presets now " + (kv.Value is JArray ? ((JArray)kv.Value).Count : -1) + ", baseline " + (before is JArray ? ((JArray)before).Count : -1)); }
+                // the tableware preset library is a list of objects: it is sent as one value and replaces the other side's list (elements cannot be merged one by one: a new element has no slot there)
+                if (kv.Name == PresetsMember)
+                {
+                    if (!JToken.DeepEquals(before, kv.Value)) { all.Add(new JObject { { "p", kv.Name }, { "o", "set" }, { "v", kv.Value } }); Base[kv.Name] = kv.Value; Plugin.Log.LogInfo("[prog] tableware presets changed here: " + (kv.Value is JArray ? ((JArray)kv.Value).Count : -1) + " preset(s)"); }
+                    continue;
+                }
                 var ops = Diff(before, kv.Value);
                 if (ops.Count == 0) continue;
                 foreach (var o in ops) { ((JObject)o)["p"] = kv.Name + "." + ((JObject)o).Value<string>("p"); all.Add(o); }
@@ -539,7 +569,9 @@ namespace HFCoop
                 if (Session.Role == Role.Client) foreach (var o in ops) { var po = (JObject)o; string pth = po.Value<string>("p"); if (pth != null && IsHostOnlyPath(pp, pth) && po.Value<string>("o") == "set") HostValues[pth] = po["v"]; }
                 FirePerkEvents(pp, perksBefore);
                 // our baseline already includes what we just applied, otherwise we would echo it back
-                var cur = DumpAll(pp); foreach (var kv in cur.Properties()) Base[kv.Name] = kv.Value;
+                // (the preset library is only re-baselined when this message changed it: a preset saved here a moment ago and not yet sent must still go out)
+                bool presetsTouched = false; foreach (var o in ops) { var pth = ((JObject)o).Value<string>("p"); if (pth != null && PresetsMember != null && (pth == PresetsMember || pth.StartsWith(PresetsMember + "."))) presetsTouched = true; }
+                var cur = DumpAll(pp); foreach (var kv in cur.Properties()) { if (kv.Name == PresetsMember && !presetsTouched) continue; Base[kv.Name] = kv.Value; }
                 try { var pv = UnityEngine.Object.FindObjectOfType<Empyrean.HouseFlipper.Tablet.PerkView.PerksView>(); if (pv != null) pv.RefreshSkillProgress(); } // an open perks tab only redraws on its own actions
                 catch (System.Exception e) { Plugin.Log.LogInfo("[prog] perks view refresh skipped: " + e.Message); }
                 return true;

@@ -16,7 +16,7 @@ namespace HFCoop
         {
             _h = new Harmony(Plugin.Guid);
             ItemSync.Patch(_h);
-            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h); RecordingGuard.Patch(_h); RecordingGuard.PatchQuests(_h); RecordingGuard.PatchLoadRaisers(_h); GrassSync.Patch(_h); WeatherSync.Patch(_h); UfoSync.Patch(_h); Workshop.Patch(_h);
+            Interactions.Patch(_h); WallSidePatch.Patch(_h); HouseChangeGuard.Patch(_h); JobSync.PatchComplete(_h); MountSync.Patch(_h); JobSync.PatchPerks(_h); JobSync.PatchLevelUp(_h); DaySync.PatchBed(_h); HouseActions.Patch(_h); RecSync.Patch(_h); LightSync.Patch(_h); RecordingGuard.Patch(_h); RecordingGuard.PatchQuests(_h); RecordingGuard.PatchLoadRaisers(_h); GrassSync.Patch(_h); WeatherSync.Patch(_h); UfoSync.Patch(_h); PetAnimSync.Patch(_h); LeafSync.Patch(_h); CoopSync.Patch(_h); Workshop.Patch(_h);
             var save = AccessTools.Method(typeof(HouseSaveManager), "SaveRecordedGame");
             if (save != null) _h.Patch(save, prefix: new HarmonyMethod(typeof(Events), "BlockClientSave"));
             else Plugin.Log.LogWarning("[save] SaveRecordedGame not found - client saves are NOT blocked");
@@ -34,7 +34,17 @@ namespace HFCoop
                 var h = Held.ToArray(); Held.Clear();
                 foreach (var kv in h) { var rr = new R(kv.Value); Handle(kv.Key, rr.Type, rr, kv.Value); }
             }
-            Watchdog.Phase("evt.item"); ItemSync.Tick(); GrassSync.Tick(); PetSync.Tick(); StateSync.Tick(); CropSync.Tick(); DroneSync.Tick(); Workshop.Tick(); InstSync.Tick(); MountSync.Tick(); LightSync.Tick(); Watchdog.Phase("evt.rec"); RecSync.Tick(); Watchdog.Phase("evt.money"); MoneySync.Tick(); ProgressSync.Tick(); FollowHost.Tick(); ClockSync.Tick(); DaySync.Tick(); JobSync.Tick(); CarrySync.Tick();
+            // every tracker runs on its own: one that throws must not stop the ones after it (the progress sync used to be skipped for the whole frame)
+            Watchdog.Phase("evt.item"); T("item", ItemSync.Tick); T("grass", GrassSync.Tick); T("pet", PetSync.Tick); T("state", StateSync.Tick); T("crop", CropSync.Tick); T("drone", DroneSync.Tick); T("leaf", LeafSync.Tick); T("coop", CoopSync.Tick);
+            T("workshop", Workshop.Tick); T("inst", InstSync.Tick); T("mount", MountSync.Tick); T("light", LightSync.Tick); Watchdog.Phase("evt.rec"); T("rec", RecSync.Tick); Watchdog.Phase("evt.money"); T("money", MoneySync.Tick);
+            T("progress", ProgressSync.Tick); T("follow", FollowHost.Tick); T("clock", ClockSync.Tick); T("day", DaySync.Tick); T("job", JobSync.Tick); T("carry", CarrySync.Tick);
+        }
+
+        static readonly HashSet<string> _tickFailed = new HashSet<string>();
+        static void T(string name, Action tick)
+        {
+            try { tick(); }
+            catch (Exception e) { if (_tickFailed.Add(name)) Plugin.Log.LogError("[evt] the " + name + " tracker threw (it is skipped this frame, others still run): " + e); }
         }
 
         public static void OnSessionStart() { MoneySync.OnSessionStart(); if (Session.Role == Role.Host) ItemSync.AssignAnonymousIds(); }
@@ -48,9 +58,9 @@ namespace HFCoop
             return false;
         }
 
-        public static void OnSessionEnd() { ItemSync.Reset(); RecSync.Reset(); Snapshot.Loading = false; Snapshot.Ready = false; Applying = false; MoneySync.OnSessionEnd(); ProgressSync.OnSessionEnd(); Workshop.OnSessionEnd(); FollowHost.Reset(); ClockSync.Reset(); JobSync.Reset(); CarrySync.Reset(); MountSync.Reset(); InstSync.Reset(); LightSync.Reset(); }
+        public static void OnSessionEnd() { PetMotion.Reset(); ItemSync.Reset(); RecSync.Reset(); Snapshot.Loading = false; Snapshot.Ready = false; Applying = false; MoneySync.OnSessionEnd(); ProgressSync.OnSessionEnd(); Workshop.OnSessionEnd(); FollowHost.Reset(); ClockSync.Reset(); JobSync.Reset(); CarrySync.Reset(); MountSync.Reset(); InstSync.Reset(); LightSync.Reset(); }
         public static void OnPlayerJoined(Conn c) { MoneySync.SendBalanceTo(c); ProgressSync.SendFullTo(c); }
-        public static void OnPlayerLeft(int id) { }
+        public static void OnPlayerLeft(int id) { PetMotion.OnPlayerLeft(id); }
         /// <summary>Client got Welcome: ask for the host's current house state.</summary>
         public static void OnWelcome(string hostScene) { Snapshot.Request(); }
 
@@ -78,7 +88,7 @@ namespace HFCoop
             // follows a few seconds later; until then the client ignores events, and the host ignores a client's events until it reports "ready" in the new house.
             if (Session.Role == Role.Client && kind == "house" && key == "changing") { Snapshot.SuspendEvents(); return; }
             if (Session.Role == Role.Client && Snapshot.EventsSuspended && kind != "house") return;
-            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); Interactions.SendStatesTo(from); GrassSync.SendTo(from); WeatherSync.SendTo(from); PetSync.SendTo(from); CropSync.SendTo(from); return; }
+            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); Interactions.SendStatesTo(from); GrassSync.SendTo(from); WeatherSync.SendTo(from); PetSync.SendTo(from); CropSync.SendTo(from); StateSync.SendTo(from); return; }
             if (Session.Role == Role.Host && kind != "house" && FollowHost.IsPending(origin)) return;
             bool ok = false;
             Applying = true;
@@ -107,6 +117,8 @@ namespace HFCoop
                     case "dlc": if (key == "host") DlcGate.OnHostList(json); else if (key == "blocked") { DlcGate.OnBlocked(json); Snapshot.Blocked(); } ok = true; break;
                     case "ufo": ok = UfoSync.Apply(key, json); break;
                     case "drone": ok = DroneSync.Apply(key, json); break;
+                    case "leaf": ok = LeafSync.Apply(key, json); break;
+                    case "coop": ok = CoopSync.Apply(key, json); break;
                     default: Plugin.Log.LogWarning("[evt] unknown event kind " + kind); break;
                 }
             }
