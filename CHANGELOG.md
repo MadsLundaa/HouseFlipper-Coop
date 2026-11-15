@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1 (beta)
+Bug fixes: joining over Steam on big houses, shared budgets in jobs that have their own, doors used at the same moment, a restarted host sending its house.
+
+* **Fixed: joining over Steam could loop forever on big houses** (GitHub issue #2): the host's large messages (a house's lawn can be about 2 MB) filled Steam's send buffer, the send failed and the connection was closed, so the player kept reconnecting. Messages now wait in a queue and go out as Steam has room, and the send buffer is raised to 8 MB.
+* **Fixed: spending in a job with its own budget was not shared** (farm, DineOut and HGTV jobs): the game spends from the order's budget there, but the mod only shared the profile balance, so each player had their own budget. The budget is now shared like the balance (spending and earning on either side, and a player who joins or rejoins gets the host's budget); the profile balance stays separate. Checked on an HGTV job: host -1000, client -500, client +250, rejoin: same budget on both sides throughout; no budget messages when moving to a house without one.
+* **Fixed: a host that restarted could not send its house**: the house snapshot failed to serialize once the floor changes had been loaded from the save ("Could not convert string 'GridCoords: ...' to dictionary key type"); the floor changes are now sent as a list.
+* **Fixed: a door used by two players at the same moment could end up open on one side and closed on the other**: a door use now carries the state the door is heading to, and a use that arrives while the door is still moving is retried. Checked: three rounds of both players using the same door at once, same state on both sides.
+* Pet AI resume: the game's unsubscribe step is found more reliably.
+
 ## 0.7.0 (beta)
 The mod is now a beta: it covers the base game and the DLC areas and has been tested on two and three players, on one PC and over a real network.
 

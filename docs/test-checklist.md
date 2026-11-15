@@ -4,6 +4,27 @@ Setup for all "verified" items: two real House Flipper processes on one Windows 
 
 Legend: ✅ verified · 🟡 verified via dev trigger only · ❌ not working/not implemented · ⬜ not tested
 
+## Current status (audit 2026-11-15, 0.7.0 + unreleased fixes)
+The tables further down are mostly from 0.2-0.4 and many of their ⬜/🟡 rows were verified later. This section is the current summary; where it disagrees with an older row, this section is right.
+
+**Verified since the old tables** (real actions, or the game's own code paths with two or three game windows; ✱ = on a second PC over the real network / Steam):
+* Real tool use by hand: painting, wallpaper, floors, demolition, tablet purchase, doors, hoeing and sowing, leaf blower, pet interactions (pick up, pet, feed), eggs.
+* Item damage, window cleaning, plaster, cockroach nests, rubbish piles, light bulbs, mounted devices (showers, radiators, outlets, fuse boxes).
+* Doors used by both players at the same moment (3 rounds, same state; fixed in the unreleased build).
+* Session handling: session full (MaxPlayers), client drop and host drop with reconnect (TCP) ✱(Steam, 0.4.2), host crash, host coming back inside the reconnect window, joining a host still in the menu, normal leave restoring the client's own balance and progression, KeepSharedProgress=true, background running (both games always run unfocused in the tests).
+* Steam over the internet ✱ (0.4.1); joining over Steam with a 1966 KB lawn ✱ (GitHub #2: no "send buffer full", house and lawn received, connection stayed up).
+* Frames over 480 KB: the 1966 KB lawn over TCP and over Steam ✱.
+* Host restart: the house snapshot is built from a reloaded save (fixed: floor changes serialized as a list).
+* Order budgets (farm, DineOut, HGTV jobs): shared both ways, rejoin gets the host's budget, profile balance separate (fixed in the unreleased build; before it each player had their own budget).
+* Three players (0.6/0.7), all 21 animal types, coop nests, DineOut presets, workshop items ✱.
+
+**Still not tested** (needs a person, a special house state, or more machines):
+* Script/story lists of HGTV jobs (`decisionsMade`, `plotTwistActivated`, `actionWithTriggerActivated`, `cursesProgress`): synced by RecSync, but no save in the test profile has any entry and the choices need the job's story events.
+* Magnets kept unpainted (`magnetsNeverWhiteAgain`), turf rolls, prefab swaps: synced, never triggered in a test.
+* Typing an IP into the panel field and the "Cancel reconnecting" button (both IMGUI panel controls that need real clicks and typing).
+* How the Discord presence looks to friends; the Steam friends-hosting list with two accounts that are friends.
+* Four or more players; a long soak session (hours) with real play.
+
 ## Milestones
 | # | Item | Status | Evidence |
 |---|---|---|---|

@@ -35,7 +35,7 @@ namespace HFCoop
                 foreach (var kv in h) { var rr = new R(kv.Value); Handle(kv.Key, rr.Type, rr, kv.Value); }
             }
             // every tracker runs on its own: one that throws must not stop the ones after it (the progress sync used to be skipped for the whole frame)
-            Watchdog.Phase("evt.item"); T("item", ItemSync.Tick); T("grass", GrassSync.Tick); T("pet", PetSync.Tick); T("state", StateSync.Tick); T("crop", CropSync.Tick); T("drone", DroneSync.Tick); T("leaf", LeafSync.Tick); T("coop", CoopSync.Tick);
+            Watchdog.Phase("evt.item"); T("item", ItemSync.Tick); T("grass", GrassSync.Tick); T("pet", PetSync.Tick); T("state", StateSync.Tick); T("crop", CropSync.Tick); T("drone", DroneSync.Tick); T("leaf", LeafSync.Tick); T("use", Interactions.Tick); T("coop", CoopSync.Tick);
             T("workshop", Workshop.Tick); T("inst", InstSync.Tick); T("mount", MountSync.Tick); T("light", LightSync.Tick); Watchdog.Phase("evt.rec"); T("rec", RecSync.Tick); Watchdog.Phase("evt.money"); T("money", MoneySync.Tick);
             T("progress", ProgressSync.Tick); T("follow", FollowHost.Tick); T("clock", ClockSync.Tick); T("day", DaySync.Tick); T("job", JobSync.Tick); T("carry", CarrySync.Tick);
         }
@@ -88,7 +88,7 @@ namespace HFCoop
             // follows a few seconds later; until then the client ignores events, and the host ignores a client's events until it reports "ready" in the new house.
             if (Session.Role == Role.Client && kind == "house" && key == "changing") { Snapshot.SuspendEvents(); return; }
             if (Session.Role == Role.Client && Snapshot.EventsSuspended && kind != "house") return;
-            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); Interactions.SendStatesTo(from); GrassSync.SendTo(from); WeatherSync.SendTo(from); PetSync.SendTo(from); CropSync.SendTo(from); StateSync.SendTo(from); return; }
+            if (Session.Role == Role.Host && kind == "house" && key == "ready") { FollowHost.ClientReady(origin); Interactions.SendStatesTo(from); GrassSync.SendTo(from); WeatherSync.SendTo(from); PetSync.SendTo(from); CropSync.SendTo(from); StateSync.SendTo(from); MoneySync.SendBalanceTo(from); return; }
             if (Session.Role == Role.Host && kind != "house" && FollowHost.IsPending(origin)) return;
             bool ok = false;
             Applying = true;

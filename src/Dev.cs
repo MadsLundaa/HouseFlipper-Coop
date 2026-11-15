@@ -120,6 +120,10 @@ namespace HFCoop
                     if (a.Length > 1) MoneySync.DevAdd(double.Parse(a[1], System.Globalization.CultureInfo.InvariantCulture));
                     Plugin.Log.LogInfo("[dev] balance " + MoneySync.Balance());
                     break;
+                case "budget":
+                    if (a.Length > 1) MoneySync.DevAddBudget(double.Parse(a[1], System.Globalization.CultureInfo.InvariantCulture));
+                    Plugin.Log.LogInfo("[dev] budget " + MoneySync.BudgetValue() + " balance " + MoneySync.Balance());
+                    break;
                 case "usekey":
                     {
                         // list interactables near the player with their cross-peer keys
@@ -701,6 +705,7 @@ namespace HFCoop
                 case "host": Session.StartHost(); break;
                 case "join": Session.StartJoin(a.Length > 1 ? a[1] : Cfg.JoinAddress.Value); break;
                 case "leave": Session.Leave(); break;
+                case "drop": Session.DebugDrop(); Plugin.Log.LogInfo("[dev] dropped every connection without a goodbye (like Ctrl+F12)"); break;
                 case "dumprec":
                     {
                         var rec = (typeof(HouseSaveManager).GetProperty("Instance").GetValue(null, null) as HouseSaveManager).Recorder;

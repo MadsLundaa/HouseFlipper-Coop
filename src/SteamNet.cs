@@ -53,7 +53,25 @@ namespace HFCoop
             if (_init) return;
             SteamNetworkingUtils.InitRelayNetworkAccess();
             _cb = Callback<SteamNetConnectionStatusChangedCallback_t>.Create(OnStatus);
+            try { RaiseSendBuffer(); } catch (Exception e) { Plugin.Log.LogWarning("[steam] send buffer setting not available: " + e.Message); }
             _init = true;
+        }
+
+        // Steam's default send buffer (512 KB) is smaller than one lawn message; a larger one lets big messages go out in one go (the queue above handles the rest)
+        static void RaiseSendBuffer()
+        {
+            try
+            {
+                var v = Marshal.AllocHGlobal(4);
+                try
+                {
+                    Marshal.WriteInt32(v, 8 * 1024 * 1024);
+                    bool ok = SteamNetworkingUtils.SetConfigValue(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_SendBufferSize, ESteamNetworkingConfigScope.k_ESteamNetworkingConfig_Global, IntPtr.Zero, ESteamNetworkingConfigDataType.k_ESteamNetworkingConfig_Int32, v);
+                    Plugin.Log.LogInfo("[steam] send buffer raised to 8 MB: " + ok);
+                }
+                finally { Marshal.FreeHGlobal(v); }
+            }
+            catch (Exception e) { Plugin.Log.LogWarning("[steam] could not raise the send buffer (" + e.Message + "): large messages are paced instead"); }
         }
 
         // ---- host ----
@@ -192,30 +210,64 @@ namespace HFCoop
 
         public SteamConn(HSteamNetConnection h, bool incoming) { H = h; IsIncoming = incoming; }
 
+        // Steam keeps a send buffer of a few hundred KB per connection. A large message (the lawn masks are about 2 MB) was handed over as all of its chunks at once, the
+        // buffer filled up, and "send buffer full" closed the connection; the client reconnected, got the lawn again and was dropped again, forever. Chunks that do not fit
+        // now wait in this queue (in order, ahead of any later message) and are handed to Steam as the buffer drains, a few each frame. The connection is only given up when
+        // nothing could be sent for a long time or the queue grows absurdly large.
+        readonly Queue<byte[]> _pending = new Queue<byte[]>();
+        long _pendingBytes; double _stuckSince;
+        const long MaxPendingBytes = 64L * 1024 * 1024;
+
         public override void Send(byte[] payload)
         {
             if (Closed) return;
             try
             {
-                if (payload.Length + 1 <= Chunk) { Put(0, payload, 0, payload.Length); return; }
-                for (int off = 0; off < payload.Length; off += Chunk - 1)
-                {
-                    int n = Math.Min(Chunk - 1, payload.Length - off);
-                    Put((byte)(off + n >= payload.Length ? 2 : 1), payload, off, n);
-                }
+                if (payload.Length + 1 <= Chunk) { Enqueue(0, payload, 0, payload.Length); }
+                else
+                    for (int off = 0; off < payload.Length; off += Chunk - 1)
+                    {
+                        int n = Math.Min(Chunk - 1, payload.Length - off);
+                        Enqueue((byte)(off + n >= payload.Length ? 2 : 1), payload, off, n);
+                    }
+                Pump();
             }
             catch (Exception e) { Close("send failed: " + e.Message); }
         }
 
-        void Put(byte kind, byte[] data, int off, int n)
+        void Enqueue(byte kind, byte[] data, int off, int n)
         {
-            var p = Marshal.AllocHGlobal(n + 1);
+            var b = new byte[n + 1]; b[0] = kind; Buffer.BlockCopy(data, off, b, 1, n);
+            _pending.Enqueue(b); _pendingBytes += b.Length;
+            if (_pendingBytes > MaxPendingBytes) throw new IOException("more than " + (MaxPendingBytes >> 20) + " MB waiting to be sent");
+        }
+
+        /// <summary>Hand queued chunks to Steam until its send buffer is full (the rest goes on a later frame).</summary>
+        internal void Pump()
+        {
+            if (Closed) return;
+            while (_pending.Count > 0)
+            {
+                var b = _pending.Peek();
+                var r = Put(b);
+                if (r == EResult.k_EResultLimitExceeded)
+                {
+                    double now = Session.Now; if (_stuckSince == 0) _stuckSince = now;
+                    if (now - _stuckSince > 60.0) { Close("send failed: Steam send buffer stayed full for 60 s"); }
+                    return;
+                }
+                if (r != EResult.k_EResultOK) { Close("send failed: Steam send result " + r); return; }
+                _pending.Dequeue(); _pendingBytes -= b.Length; _stuckSince = 0;
+            }
+        }
+
+        EResult Put(byte[] b)
+        {
+            var p = Marshal.AllocHGlobal(b.Length);
             try
             {
-                Marshal.WriteByte(p, kind); Marshal.Copy(data, off, p + 1, n);
-                long num; var r = SteamNetworkingSockets.SendMessageToConnection(H, p, (uint)(n + 1), 9 /* reliable + no nagle */, out num);
-                if (r != EResult.k_EResultOK && r != EResult.k_EResultLimitExceeded) throw new IOException("Steam send result " + r);
-                if (r == EResult.k_EResultLimitExceeded) throw new IOException("Steam send buffer full");
+                Marshal.Copy(b, 0, p, b.Length);
+                long num; return SteamNetworkingSockets.SendMessageToConnection(H, p, (uint)b.Length, 9 /* reliable + no nagle */, out num);
             }
             finally { Marshal.FreeHGlobal(p); }
         }
@@ -223,6 +275,7 @@ namespace HFCoop
         internal void Poll()
         {
             if (Closed || State != 1) return;
+            if (_pending.Count > 0) Pump();
             var msgs = new IntPtr[32];
             int n = SteamNetworkingSockets.ReceiveMessagesOnConnection(H, msgs, msgs.Length);
             for (int i = 0; i < n; i++)

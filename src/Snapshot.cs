@@ -115,11 +115,30 @@ namespace HFCoop
             Recording rec = h.MakeCurrentGameRecording();
             if (rec == null) { Plugin.Log.LogWarning("[snap] host has no recording"); return; }
             ItemSync.AssignLoadedIds(rec); ItemSync.AssignAnonymousIds();
-            string json = rec.ToJsonString();
+            string json = SnapshotJson(rec);
             string map = ItemSync.ExportIdMap(rec);
             var gz = Gzip(json);
             c.Send(new W(Msg.Snapshot).S(Plugin.SceneName).S(map).Bytes(gz).Done());
             Plugin.Log.LogInfo("[snap] sent snapshot to #" + c.PlayerId + ": " + json.Length + " chars json, " + gz.Length + " bytes gz");
+        }
+
+        // While a house is open the game keeps its floor changes in a dictionary keyed by grid coordinates (the saved list is copied into it on load) and only moves them
+        // back into the list when it saves. Serialised as it is, the dictionary's keys became plain text ("GridCoords: 40, 72, GroundFloor") that cannot be read back, so a
+        // player joining a house with changed floors could not load it at all (and asked again forever). The snapshot carries the floors the way a save does: as the list
+        // (from the dictionary when it has entries), with an empty dictionary. The host's own recording is left exactly as it was.
+        static System.Reflection.FieldInfo _floorDictF, _floorListF;
+        static string SnapshotJson(Recording rec)
+        {
+            const System.Reflection.BindingFlags F = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+            if (_floorDictF == null) { _floorDictF = typeof(Recording).GetField("modifiedFloorsDictionary", F); _floorListF = typeof(Recording).GetField("modifiedFloors", F); }
+            var dict = _floorDictF == null ? null : _floorDictF.GetValue(rec) as System.Collections.IDictionary;
+            if (dict == null || dict.Count == 0 || _floorListF == null) return rec.ToJsonString();
+            object oldList = _floorListF.GetValue(rec);
+            var list = (System.Collections.IList)Activator.CreateInstance(_floorListF.FieldType);
+            foreach (System.Collections.DictionaryEntry e in dict) list.Add(e.Value);
+            var empty = Activator.CreateInstance(_floorDictF.FieldType);
+            try { _floorListF.SetValue(rec, list); _floorDictF.SetValue(rec, empty); return rec.ToJsonString(); }
+            finally { _floorListF.SetValue(rec, oldList); _floorDictF.SetValue(rec, dict); }
         }
 
         // ---- client ----

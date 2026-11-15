@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using FrozenWay.HouseFlipper.Pets;
 using UnityEngine;
 
@@ -25,18 +26,24 @@ namespace HFCoop
             // Initialize subscribes the manager to three events, among them a static scene-change event; running it on a manager that is still subscribed added a second subscription,
             // and the one left behind when the pet was destroyed broke the next house load (the game's scene loader stopped on it: the house never finished loading, so no animals).
             _isSetUp = mt.GetProperty("تٜٙجهچ", F);
+            // the subscribe step (Initialize calls it) adds three handlers; its counterpart removes the same three. Found by what they call: the parameterless method that only
+            // removes handlers and removes the most of them, preferring the shortest such method (OnDestroy-like methods do more)
+            int best = 0, bestLen = int.MaxValue; var seen = new StringBuilder();
             foreach (var m in mt.GetMethods(F | BindingFlags.DeclaredOnly))
             {
-                if (m.GetParameters().Length != 0 || m.ReturnType != typeof(void) || m.GetMethodBody() == null) continue;
-                var il = m.GetMethodBody().GetILAsByteArray(); int removes = 0, adds = 0;
+                if (m.GetParameters().Length != 0 || m.ReturnType != typeof(void)) continue;
+                byte[] il; try { var body = m.GetMethodBody(); il = body == null ? null : body.GetILAsByteArray(); } catch { continue; }
+                if (il == null) continue; int removes = 0, adds = 0;
                 for (int i = 0; i + 4 < il.Length; i++)
                 {
                     if (il[i] != 0x28 && il[i] != 0x6F) continue;
                     try { var cb = mt.Module.ResolveMethod(BitConverter.ToInt32(il, i + 1)); if (cb == null) continue; if (cb.Name.StartsWith("remove_")) removes++; else if (cb.Name.StartsWith("add_")) adds++; } catch { }
                 }
-                if (removes == 3 && adds == 0 && il.Length < 120) { _unsub = m; break; }
+                if (removes > 0) seen.Append(" [" + removes + "-/" + adds + "+ " + il.Length + "b]");
+                if (adds == 0 && removes >= 3 && (removes > best || (removes == best && il.Length < bestLen))) { _unsub = m; best = removes; bestLen = il.Length; }
             }
-            if (_unsub == null) Plugin.Log.LogWarning("[petai] the AI's unsubscribe step was not found: resuming a pet may leave an extra event subscription");
+            if (_unsub == null) Plugin.Log.LogWarning("[petai] the AI's unsubscribe step was not found (methods that remove handlers:" + seen + "): resuming a pet may leave an extra event subscription");
+            else Plugin.Log.LogInfo("[petai] AI unsubscribe step found (" + best + " handlers, " + bestLen + " bytes)");
             var ps = _init.GetParameters();
             foreach (var f in mt.GetFields(F))
             {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using Empyrean.HouseFlipper.Core.Interactions;
@@ -150,7 +151,43 @@ namespace HFCoop
             }
             string key = KeyOf(__instance);
             if (key == null) { if (Cfg.VerboseLog.Value) Plugin.Log.LogInfo("[use] no key for " + Inspector.Path(__instance.transform)); return; }
-            Events.Send("use", key, (smart ? "S|" : "") + (IsDoor(__instance) ? OpenerJson() : ""));
+            bool? target = TargetClosed(__instance);
+            Events.Send("use", key, (smart ? "S|" : "") + (IsDoor(__instance) ? OpenerJson() : "") + (target == null ? "" : (target.Value ? ";T=C" : ";T=O")));
+        }
+
+        // ---- doors, drawers, windows: the use carries where the part is heading ----
+        // A use used to be a plain toggle: when two players used the same door at the same moment, each game applied its own toggle and then the other's, and the two
+        // ended up opposite (open on one side, closed on the other). A remote use that arrived while the part was still moving was also ignored by the game. The sender
+        // now says where the part is heading (open or closed); the receiver only uses its part when it is not already heading there, and tries again once it stops moving.
+        static FieldInfo _closedF; static bool _closedResolved;
+        static MovablePart PartOf(Component c) { if (c == null) return null; return c as MovablePart ?? c.GetComponent<MovablePart>(); }
+        static bool? TargetClosed(Component c)
+        {
+            var mp = PartOf(c); if (mp == null) return null;
+            if (!_closedResolved)
+            {
+                _closedResolved = true;
+                // MovablePart's own protected bool: set when a transition starts, true = heading home (closed), false = heading away (open)
+                _closedF = typeof(MovablePart).GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).FirstOrDefault(f => f.FieldType == typeof(bool) && f.IsFamily);
+                if (_closedF == null) Plugin.Log.LogWarning("[use] door state field not found: doors are synced as toggles");
+            }
+            if (_closedF == null) return null;
+            try { return (bool)_closedF.GetValue(mp); } catch { return null; }
+        }
+
+        class Retry { public Interactable I; public bool Closed; public double Until; public bool Smart; }
+        static readonly List<Retry> Retries = new List<Retry>();
+        static double _retryAt;
+        public static void Tick()
+        {
+            if (Retries.Count == 0 || Time.realtimeSinceStartup < _retryAt) return; _retryAt = Time.realtimeSinceStartup + 0.25;
+            foreach (var r in Retries.ToList())
+            {
+                var cur = TargetClosed(r.I);
+                if (r.I == null || cur == null || cur.Value == r.Closed || Time.realtimeSinceStartup > r.Until) { Retries.Remove(r); continue; }
+                bool was = Events.Applying; Events.Applying = true;
+                try { if (r.Smart) r.I.SmartInteract(); else r.I.Interact(); } catch { } finally { Events.Applying = was; }
+            }
         }
 
         /// <summary>Stable cross-peer key: the object's scene guid if the game's mapper knows it, else "owning item guid | child index path".</summary>
@@ -195,8 +232,10 @@ namespace HFCoop
             if (c == null) { Plugin.Log.LogWarning("[use] cannot resolve " + key); return false; }
             // lamp states travel through LightSync; a client's copy of the switch has its own wiring (or none), so it must not toggle lamps on its own here
             if (Session.Role == Role.Client) for (var t = c.GetType(); t != null; t = t.BaseType) if (t.Name == "HFLightSwitch") return true;
-            Vector3? pos = null; bool smartUse = false;
+            Vector3? pos = null; bool smartUse = false; bool? wantClosed = null;
             if (json != null && json.StartsWith("S|")) { smartUse = true; json = json.Substring(2); }
+            if (json != null) { int t = json.IndexOf(";T="); if (t >= 0) { wantClosed = json.Substring(t + 3).StartsWith("C"); json = json.Substring(0, t); } }
+            if (wantClosed != null) { var now = TargetClosed(c); if (now != null && now.Value == wantClosed.Value) return true; }   // already heading where the other player's door is heading
             if (!string.IsNullOrEmpty(json))
             {
                 var s = json.Split(',');
@@ -206,6 +245,7 @@ namespace HFCoop
             }
             _openerPos = pos; // the door decides its swing side from the opener, not from this peer's player
             try { if (smartUse) c.SmartInteract(); else c.Interact(); } finally { _openerPos = null; }
+            if (wantClosed != null) { var after = TargetClosed(c); if (after != null && after.Value != wantClosed.Value) Retries.Add(new Retry { I = c, Closed = wantClosed.Value, Until = Time.realtimeSinceStartup + 5.0, Smart = smartUse }); }   // still moving: the game ignored the use
             return true;
         }
     }
