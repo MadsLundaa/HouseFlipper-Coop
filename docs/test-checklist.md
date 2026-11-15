@@ -16,12 +16,12 @@ The tables further down are mostly from 0.2-0.4 and many of their ⬜/🟡 rows 
 * Frames over 480 KB: the 1966 KB lawn over TCP and over Steam ✱.
 * Host restart: the house snapshot is built from a reloaded save (fixed: floor changes serialized as a list).
 * Order budgets (farm, DineOut, HGTV jobs): shared both ways, rejoin gets the host's budget, profile balance separate (fixed in the unreleased build; before it each player had their own budget).
+* Co-op panel by hand (2026-11-15, 0.7.1): typing an address into the Host field and pressing Join (typed 192.168.10.62, the host saw the join from that address, the address was saved to the config); the "Cancel reconnecting" button while the host was gone (status "Reconnect cancelled", no further attempts, own balance and progression already restored).
 * Three players (0.6/0.7), all 21 animal types, coop nests, DineOut presets, workshop items ✱.
 
 **Still not tested** (needs a person, a special house state, or more machines):
 * Script/story lists of HGTV jobs (`decisionsMade`, `plotTwistActivated`, `actionWithTriggerActivated`, `cursesProgress`): synced by RecSync, but no save in the test profile has any entry and the choices need the job's story events.
 * Magnets kept unpainted (`magnetsNeverWhiteAgain`), turf rolls, prefab swaps: synced, never triggered in a test.
-* Typing an IP into the panel field and the "Cancel reconnecting" button (both IMGUI panel controls that need real clicks and typing).
 * How the Discord presence looks to friends; the Steam friends-hosting list with two accounts that are friends.
 * Four or more players; a long soak session (hours) with real play.
 
@@ -61,7 +61,7 @@ The tables further down are mostly from 0.2-0.4 and many of their ⬜/🟡 rows 
 |---|---|
 | Host via F5, join via F6 | ✅ |
 | Panel (F7): status, player list, Disconnect, Join button | ✅ (clicked Join in the panel; list shows both players) |
-| Typing an IP into the panel text field | ⬜ (default 127.0.0.1 used) |
+| Typing an IP into the panel text field | ✅ (2026-11-15: typed 192.168.10.62, joined from it) |
 | Clean disconnect (F4) → host removes player | ✅ |
 | Rejoin gets new id and fresh snapshot | ✅ |
 | Protocol mismatch error | ✅ raw test client: "protocol mismatch (host 1, you 99)" |
