@@ -17,3 +17,19 @@ $zip = Join-Path $root "release\HouseFlipperCoop-$Version.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path "$stage\*" -DestinationPath $zip
 Get-Item $zip | Select-Object FullName, Length
+
+# Nexus Mods package: the same files in the layout the installer copies them to, ready to extract into the game folder.
+# No .bat/.ps1 scripts: Nexus quarantines archives with scripts in them. The GitHub workflow uploads this zip to Nexus.
+$nstage = Join-Path $root "release\nexus-$Version"
+if (Test-Path $nstage) { Remove-Item $nstage -Recurse -Force }
+New-Item -ItemType Directory -Force "$nstage\BepInEx\plugins\HFCoop" | Out-Null
+Copy-Item "$stage\bepinex\*" $nstage -Recurse -Force
+Copy-Item "$stage\plugin\HFCoop.dll" "$nstage\BepInEx\plugins\HFCoop\"
+Copy-Item "$root\nexus\HFCoop-README.txt" $nstage
+Copy-Item "$root\LICENSE" "$nstage\HFCoop-LICENSE.txt"; Copy-Item "$root\THIRD-PARTY.md" "$nstage\HFCoop-THIRD-PARTY.md"
+$bad = Get-ChildItem $nstage -Recurse -File | Where-Object { $_.Extension -in '.bat', '.cmd', '.ps1', '.exe', '.zip', '.vbs' }
+if ($bad) { throw "Nexus package contains files Nexus quarantines: $($bad.Name -join ', ')" }
+$nzip = Join-Path $root "release\HouseFlipperCoop-$Version-nexus.zip"
+if (Test-Path $nzip) { Remove-Item $nzip }
+Compress-Archive -Path "$nstage\*" -DestinationPath $nzip
+Get-Item $nzip | Select-Object FullName, Length

@@ -1,0 +1,93 @@
+# Uploads the Nexus package of a GitHub release to the Nexus Mods page (houseflipper/mods/11) as a new version of its main file.
+#
+# The mod cannot be compiled on GitHub (it builds against the game's own assemblies), so this workflow does not build anything:
+# it takes HouseFlipperCoop-<version>-nexus.zip from the release assets (tools/package.ps1 makes it next to the installer zip)
+# and hands it to the official Nexus upload action. That zip has no .bat/.ps1 files, so Nexus does not quarantine it.
+#
+# Setup (once): repository secret NEXUSMODS_API_KEY = a personal API key from your Nexus Mods account settings.
+# Optional repository variables NEXUSMODS_MOD_ID / NEXUSMODS_FILE_ID skip the lookup below.
+name: Upload to Nexus Mods
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to upload (e.g. v0.7.1)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+      GAME: houseflipper
+      GAME_MOD_ID: '11'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version and Nexus package
+        id: pkg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          gh release download "$TAG" --pattern "HouseFlipperCoop-$version-nexus.zip" --dir .
+          zip="HouseFlipperCoop-$version-nexus.zip"
+          test -f "$zip" || { echo "::error::the release has no $zip asset (run tools/package.ps1 and attach it)"; exit 1; }
+          # the same guard as package.ps1: never send Nexus an archive it quarantines
+          if unzip -Z1 "$zip" | grep -Eiq '\.(bat|cmd|ps1|exe|vbs|zip)$'; then echo "::error::$zip contains scripts or archives"; exit 1; fi
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+
+      - name: Changelog for this version
+        id: log
+        run: |
+          version="${{ steps.pkg.outputs.version }}"
+          # the CHANGELOG.md section whose heading starts with "## <version>", up to the next "## "
+          # (Nexus shows changelogs as plain text, so the Markdown bold markers are removed)
+          awk -v v="## $version" 'index($0, v) == 1 { on = 1; next } on && /^## / { exit } on' CHANGELOG.md | sed 's/\*\*//g' > section.txt
+          test -s section.txt || echo "See the changelog on GitHub." > section.txt
+          { echo "text<<NEXUS_EOF"; cat section.txt; echo "Full changelog: https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"; echo "NEXUS_EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Find the Nexus mod and main file
+        id: ids
+        env:
+          KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
+        run: |
+          test -n "$KEY" || { echo "::error::repository secret NEXUSMODS_API_KEY is not set"; exit 1; }
+          api=https://api.nexusmods.com/v3
+          if [ -z "$MOD_ID" ]; then
+            MOD_ID=$(curl -sSf -H "apikey: $KEY" "$api/games/$GAME/mods/$GAME_MOD_ID" | jq -r '.data.id')
+          fi
+          if [ -z "$FILE_ID" ]; then
+            # the main file that is extracted into the game folder (the installer zip is not uploaded to Nexus)
+            FILE_ID=$(curl -sSf -H "apikey: $KEY" "$api/mods/$MOD_ID/files" \
+              | jq -r '[.data.mod_files[] | select(.name | test("BepInEx included"))][0].id // empty')
+          fi
+          test -n "$MOD_ID" -a "$MOD_ID" != null || { echo "::error::could not find the Nexus mod"; exit 1; }
+          test -n "$FILE_ID" || { echo "::error::could not find the '(BepInEx included)' main file; set NEXUSMODS_FILE_ID"; exit 1; }
+          echo "mod_id=$MOD_ID" >> "$GITHUB_OUTPUT"
+          echo "file_id=$FILE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Nexus Mods
+        # Nexus-Mods/upload-action v1.0.0-beta.11, pinned to its commit
+        uses: Nexus-Mods/upload-action@98532f7670c27cbecc78fae03fa3e278147827e2
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          mod_id: ${{ steps.ids.outputs.mod_id }}
+          file_id: ${{ steps.ids.outputs.file_id }}
+          filename: ${{ steps.pkg.outputs.zip }}
+          display_name: House Flipper Co-op ${{ steps.pkg.outputs.version }} (BepInEx included)
+          description: Extract into the game folder (next to HouseFlipper.exe). BepInEx 5.4.23.3 included.
+          version: ${{ steps.pkg.outputs.version }}
+          category: main
+          archive_existing_version: 'true'
+          update_mod_version: 'true'
+          changelog: ${{ steps.log.outputs.text }}
